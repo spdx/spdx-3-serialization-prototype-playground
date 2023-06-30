@@ -20,10 +20,9 @@ Suggestions to existing serialization approaches sill be reviewed by the contrib
 
 ## Operating Principles
 1. The [logical model](https://github.com/spdx/spdx-3-model/tree/main/model) is the single authoritative source for SPDXv3 content.
-All examples submitted to the playground should be converted to instances that match the logical model.
-If changes to the logical model invalidate examples, the examples should be updated accordingly.
-2. Each serialization method has a sponsor (individual or group) that is responsible for creating the examples and test code for that method.
-3. The barrier to entry is minimal. A sponsor may create as few or as many examples as they deem appropriate for defining the method.
+All examples submitted to the playground should correspond to the given model examples.
+2. Each serialization method has a sponsor that is responsible for creating the examples and test code for that method.
+3. The barrier to entry should be minimal. A sponsor may create as many examples as they deem appropriate for defining the method.
 4. Although examples may be initially submitted to illustrate ideas before code has been developed to process them, it will
 eventually be necessary to demonstrate that the examples correctly reflect the model.
 The code for a method includes four programs:
