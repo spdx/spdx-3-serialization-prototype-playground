@@ -16,23 +16,21 @@ New serialization approaches should be in their own directories with an appropri
 
 We will do a minimum review of new proposals before merging.
 
-Suggestions to existing serialization approaches sill be reviewed by the contributors of the original serializations approach before merging.
+Suggestions to existing serialization approaches will be reviewed by the contributors of the original serializations approach before merging.
 
 ## Operating Principles
 1. The [logical model](https://github.com/spdx/spdx-3-model/tree/main/model) is the single authoritative source for SPDXv3 content.
 All examples submitted to the playground should correspond to the given model examples to allow for easy comparison.
+The initial set of examples is from the SPDX v3 [serialization README](https://github.com/spdx/spdx-3-model/blob/main/serialization/README.md)
+   (see [use cases](use_cases.md)).
 2. The contributor for each serialization method is responsible for creating the examples and test code for that method.
-3. The barrier to entry should be minimal. A sponsor may create as many examples or as few as they deem appropriate for defining the method.
-4. Although examples may be initially submitted to illustrate ideas before code has been developed to process them, it will
-eventually be necessary to demonstrate that the examples correctly reflect the model.
-The code for a method includes four programs:
-    * element_to_model
-    * model_to_element
-    * element_set_to_payload
-    * payload_to_element_set
+3. The barrier to entry should be minimal. A contributor may create as many or as few examples as they deem appropriate for defining the method.
+4. Although examples may be initially submitted to illustrate ideas before code has been developed to process them, serializing and parsing
+code will eventually be necessary to demonstrate that the examples correctly reflect the model.
 
 ## Individual Element Examples
-* The code for a method translates between individual element examples and the corresponding model types in both directions
+* The code for a method translates between individual element examples and the corresponding model examples in both directions,
+demonstrating the ability of the serialization to correctly implement the model.
 
 | Model Examples                                                 | [RDF](rdf/README.md) | [XML](xml/README.md) | [JSON-LD](jsonld/README.md) |        [JSON1](json1/README.md)        |        [JSON2](json2/README.md)         | [JSON3](json3/README.md) | Protobuf | CBOR | YAML | [Text1](text1/README.md) |
 |----------------------------------------------------------------|:--------------------:|----------------------|-----------------------------|:--------------------------------------:|:---------------------------------------:|--------------------------|----------|:----:|------|:------------------------:|
@@ -80,7 +78,8 @@ The code for a method includes four programs:
 |                                                                |                      |                      |                             |                                        |                                         |                          |          |      |      |                          |
 | --- **Build** ---                                              |                      |                      |                             |                                        |                                         |                          |          |      |      |                          |
 |                                                                |                      |                      |                             |                                        |                                         |                          |          |      |      |                          |
-*NOTE: need list of elements required by each licensing use case, re-use existing artifact elements*
+
+*NOTE: need list of element types required by each licensing use case, specify which artifact examples*
 
 ## Multiple Element Examples
 * An element set is the list of individual element example values that are included in a Payload.  

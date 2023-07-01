@@ -8,7 +8,7 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlparse
 
 SPDX_MODEL = 'https://api.github.com/repos/spdx/spdx-3-model/contents/model'
-OUTPUT = 'generated/modelTypes.json'
+OUTDIR = 'generated'
 
 
 class WebDirEntry:
@@ -70,7 +70,7 @@ def load_model(fp):
     return model
 
 
-def make_classes(model: str = SPDX_MODEL, out: str = OUTPUT) -> None:
+def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
     os.makedirs(out, exist_ok=True)
 
     model_refs = {}
@@ -107,7 +107,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTPUT) -> None:
 
     # Dump list of ex URIs and full parsed ex into output dir
     print(f'\n{len(model_types)} Types in ex')
-    with open(out, 'w') as fp:
+    with open(os.path.join(out, 'modelTypes.json'), 'w') as fp:
         json.dump(model_types, fp, indent=2)
 
 

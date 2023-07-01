@@ -55,4 +55,4 @@ def make_types(model: str = MODEL, out: str = OUT) -> None:
 
 
 if __name__ == '__main__':
-    fire.Fire(make_types())
+    fire.Fire(make_types)
