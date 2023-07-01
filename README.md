@@ -22,7 +22,7 @@ Suggestions to existing serialization approaches sill be reviewed by the contrib
 1. The [logical model](https://github.com/spdx/spdx-3-model/tree/main/model) is the single authoritative source for SPDXv3 content.
 All examples submitted to the playground should correspond to the given model examples to allow for easy comparison.
 2. The contributor for each serialization method is responsible for creating the examples and test code for that method.
-3. The barrier to entry should be minimal. A sponsor may create as many examples as they deem appropriate for defining the method.
+3. The barrier to entry should be minimal. A sponsor may create as many examples or as few as they deem appropriate for defining the method.
 4. Although examples may be initially submitted to illustrate ideas before code has been developed to process them, it will
 eventually be necessary to demonstrate that the examples correctly reflect the model.
 The code for a method includes four programs:
