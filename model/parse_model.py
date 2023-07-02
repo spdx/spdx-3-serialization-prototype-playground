@@ -60,12 +60,12 @@ def load_model(fp):
         if m := re.match(r'^\s*##\s*(.+?)(\s*)$', line):
             model[c := m.group(1)] = {}
             cursor = [model[c]]
-        elif m := re.match(r'^[-*]\s*([-/\w]+):\s*(.*)\s*$', line):
+        elif m := re.match(r'^[-*]\s*([-/\w]+):\s*(.*?)\s*$', line):
             cursor[0].update({m.group(1): m.group(2)})
         elif m := re.match(r'^[-*]\s*([-/\w]+)\s*$', line):
             cursor[0][c := m.group(1)] = {}
             cursor = [cursor[0], cursor[0][c]]
-        elif m := re.match(r'^\s+[-*]\s*([-/\w]+):\s*(.*)\s*$', line):
+        elif m := re.match(r'^\s+[-*]\s*([-/\w]+):\s*(.*?)\s*$', line):
             cursor[1].update({m.group(1): m.group(2)})
     return model
 
@@ -106,7 +106,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
                         print('###### Ignored:', f3.name)
 
     # Dump list of ex URIs and full parsed ex into output dir
-    print(f'\n{len(model_types)} Types in ex')
+    print(f'\n{len(model_types)} Types in model')
     with open(os.path.join(out, 'modelTypes.json'), 'w') as fp:
         json.dump(model_types, fp, indent=2)
 
