@@ -6,7 +6,6 @@ import fire
 import json
 import os
 from collections import defaultdict
-from copy import copy
 from graphlib import TopologicalSorter
 
 OUT_DIR = 'generated'
@@ -55,12 +54,14 @@ def build_td(tname, model_types):
                 p = {'minCount': 0, 'maxCount': '*'}
                 p.update(tdp)
                 td['Properties'][k] = p
-            if sd := model_types.get(subclass(td), {}):
+            if sd := model_types.get(subclass(td), {}):     # TODO: generate list types
                 for k, p in sd['Properties'].items():
                     if k in td['Properties'] and p != td['Properties'][k]:
                         tdp = td['Properties'][k]    # ensure restrictions
                         assert tdp['type'] == p['type']
                     td['Properties'][k] = p
+        if 'Entries' in td:
+            pass    # process enumerated types
     return td
 
 

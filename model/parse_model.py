@@ -78,14 +78,14 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
     os.makedirs(out, exist_ok=True)
 
     model_refs = {}
-    model_types = {}
+    model_types = {'_defaults': {}}
     e1 = list_dir(model)
     assert len(e1['files']) == 0
     for d1 in e1['dirs']:
         print(f'{d1.name}')
         e2 = list_dir(d1.path)
         assert len(e2['files']) == 1
-        prefix = load_model(open_file((e2['files'][0])))['Metadata']['id']
+        model_types['_defaults'][d1.name] = load_model(open_file(e2['files'][0]))
         for d2 in e2['dirs']:
             # print(f'. {d2.name}')
             e3 = list_dir(d2.path)
@@ -99,7 +99,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
                         if meta['name'] in model_refs:
                             m = model_types[meta['name']]['Metadata']
                             print(f"###### Duplicate: {meta['name']} in {m['_profile']}/{m['_file']}, {d1.name}/{f3.name}")
-                        ref = '/'.join((prefix, meta['name']))
+                        ref = '/'.join((model_types['_defaults'][d1.name]['Metadata']['id'], meta['name']))
                         model_refs[meta['name']] = ref
                         meta['_modelRef'] = ref
                         meta['_profile'] = d1.name
@@ -109,8 +109,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
                     else:
                         print('###### Ignored:', f3.name)
 
-    # Dump list of ex URIs and full parsed ex into output dir
-    print(f'\n{len(model_types)} Types in model')
+    print(f'\n{len(model_types) - 1} Types in model')
     with open(os.path.join(out, 'modelTypes.json'), 'w') as fp:
         json.dump(model_types, fp, indent=2)
 
