@@ -17,7 +17,7 @@ class Sbom:
     rootElement: Element = None
     namespaces: NamespaceMap = None
     imports: ExternalMap = None
-    spdxId: str = None
+    spdxId: AnyUri = None
     name: str = None
     summary: str = None
     description: str = None

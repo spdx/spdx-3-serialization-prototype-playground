@@ -1,5 +1,6 @@
 # Serialization Use Cases
-Mapping from [spdx-3-model](https://github.com/spdx/spdx-3-model/blob/main/serialization/README.md) to Element Examples
+Mapping from spdx-3-model [use case list](https://github.com/spdx/spdx-3-model/blob/main/serialization/README.md)
+to Element Examples
 
 - **Person:** [Person1](ex/person1.md) with minimal CreationInfo 
 - **Agent:** [Agent1](ex/agent.md)
