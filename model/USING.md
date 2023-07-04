@@ -13,8 +13,8 @@ The template classes are generated from the logical model:
 class Sbom:
     sbomType: SBOMType = None
     context: str = None
-    element: Element = None
-    rootElement: Element = None
+    element: AnyUri = None
+    rootElement: AnyUri = None
     namespaces: NamespaceMap = None
     imports: ExternalMap = None
     spdxId: AnyUri = None
