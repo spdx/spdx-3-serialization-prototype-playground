@@ -19,10 +19,11 @@ class WebDirEntry:
     """
     Fake os.DirEntry type for GitHub filesystem
     """
-    def __init__(self, name, path, url):
+    def __init__(self, name: str, path: str, url: str, html: str):
         self.name = name
         self.path = path
         self.url = url
+        self.html = html
 
 
 def list_dir(dirpath: str) -> dict:
@@ -41,7 +42,7 @@ def list_dir(dirpath: str) -> dict:
         with urlopen(Request(dirpath, headers=AUTH)) as d:
             for dl in json.loads(d.read().decode()):
                 url = 'url' if dl['type'] == 'dir' else 'download_url'
-                entry = WebDirEntry(dl['name'], dl[url], dl['url'])
+                entry = WebDirEntry(dl['name'], dl[url], dl['url'], dl['html_url'])
                 (dirs if dl['type'] == 'dir' else files).append(entry)
     else:
         with os.scandir(dirpath) as dlist:
@@ -83,7 +84,12 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
     os.makedirs(out, exist_ok=True)
 
     model_refs = {}
-    model_types = {'_commit': commit['url'], '_defaults': {}}
+    model_types = {
+        '_commit': {
+            'url': commit['url'],
+            'html_url': commit['html_url'],
+            'date': commit['commit']['committer']['date']},
+        '_defaults': {}}
     e1 = list_dir(model)
     assert len(e1['files']) == 0
     for d1 in e1['dirs']:
@@ -110,6 +116,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
                         meta['_profile'] = d1.name
                         meta['_category'] = d2.name
                         meta['_file'] = f3.name
+                        meta['_html'] = f3.html
                         model_types[meta['name']] = model
                     else:
                         print('###### Ignored:', f3.name)

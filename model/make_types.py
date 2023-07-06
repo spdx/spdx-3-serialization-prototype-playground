@@ -35,6 +35,7 @@ model_patches = {
             '_profile': 'Core',
             '_category': 'Classes',
             '_file': 'AnyUri.md',
+            '_html': '',
             '_generated': True
         },
         'Properties': {}
@@ -49,6 +50,7 @@ model_patches = {
             '_profile': 'Core',
             '_category': 'Classes',
             '_file': 'SpdxId.md',
+            '_html': '',
             '_generated': True
         },
         'Properties': {}
@@ -60,13 +62,14 @@ def write_tools_class(model, mtypes, out):
     meta = mtypes[model]['Metadata']
     for m in meta:
         assert m in {'name', 'SubclassOf', 'Instantiability',
-                     '_modelRef', '_profile', '_category', '_file', '_generated', '_root_class'}
+                     '_modelRef', '_profile', '_category', '_file', '_html', '_generated', '_root_class'}
 
     pdir = os.path.join(out, meta['_profile'])
     os.makedirs(pdir, exist_ok=True)
     class_name = meta['name']
-    parent_name = meta.get('SubclassOf', '')
-    with open(os.path.join(pdir, meta['name']) + '.py', 'w') as fp:
+    with open(os.path.join(pdir, meta['name']) + '.md', 'w') as fp:
+        commit = f'[{mtypes["_commit"]["url"].split("/")[-1][:7]}]({mtypes["_commit"]["html_url"]})'
+        fp.write(f'## [{class_name}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
         if meta['_category'] == 'Classes':
             fp.write(f'class {class_name}:\n')
             for k, v in mtypes[model]['Properties'].items():
@@ -74,11 +77,16 @@ def write_tools_class(model, mtypes, out):
                 rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
                 ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
                 ptype = 'SpdxId' if k == 'spdxId' else ptype    # Patch until Element fixed in model
-                fp.write(f'    {k}: {ptype} = None\n')
+                prop = f'{k}: {ptype} = None'
+                opt = ' optional' if str(v['minCount']) == '0' else ''
+                pmin = v['minCount'] if (pmax := v['maxCount']) == '1' else '1'
+                mult = f'Set[{pmin}..{pmax}]' if pmax != '1' else ''
+                fp.write(f'    {prop:50} #{opt} {mult}\n')
         elif meta['_category'] == 'Vocabularies':
             fp.write(f'class {class_name}(Enum):\n')
             for n, v in enumerate(mtypes[model]['Entries'], start=1):
                 fp.write(f'    {v} = {n}\n')
+        fp.write('```\n')
 
 
 def subclass(td):
@@ -100,7 +108,7 @@ def build_td(tname, model_types):
                     assert int(p['minCount']) <= int(p['maxCount'])
                 td['Properties'][k] = p
             # Propagate properties to subclasses
-            if sd:     # TODO: generate list types
+            if sd:
                 for k, p in sd['Properties'].items():
                     if k in td['Properties'] and p != td['Properties'][k]:
                         tdp = td['Properties'][k]    # ensure restrictions
@@ -110,6 +118,7 @@ def build_td(tname, model_types):
                         if p['maxCount'] != '*':
                             assert int(tdp['maxCount']) <= int(p['maxCount']),\
                                 f'Cannot relax constraint: {tname} maxCount {p["maxCount"]} -> {tdp["maxCount"]}'
+                        p = tdp
                     td['Properties'][k] = p
     return td
 
