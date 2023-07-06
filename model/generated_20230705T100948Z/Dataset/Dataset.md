@@ -1,0 +1,48 @@
+## [Dataset](https://github.com/spdx/spdx-3-model/blob/main/model/Dataset/Classes/Dataset.md)
+Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6b760ab87fee0d4a11e3f4) 2023-07-05T10:09:48Z
+```
+class Dataset:
+    datasetType: DatasetType = None                    # Set[1..*]
+    dataCollectionProcess: str = None                  # optional 
+    intendedUse: str = None                            # optional 
+    datasetSize: xsd:nonNegativeInteger = None         # optional 
+    datasetNoise: str = None                           # optional 
+    dataPreprocessing: str = None                      # optional Set[1..*]
+    sensor: /Core/DictionaryEntry = None               # optional Set[1..*]
+    knownBias: str = None                              # optional Set[1..*]
+    sensitivePersonalInformation: PresenceType = None  # optional 
+    anonymizationMethodUsed: str = None                # optional Set[1..*]
+    confidentialityLevel: ConfidentialityLevelType = None # optional 
+    datasetUpdateMechanism: str = None                 # optional 
+    datasetAvailability: DatasetAvailabilityType = None # optional 
+    packageVersion: str = None                         # optional 
+    downloadLocation: AnyUri = None                    # * optional 
+    packageUrl: AnyUri = None                          # * optional 
+    homePage: AnyUri = None                            # * optional 
+    sourceInfo: str = None                             # optional 
+    contentIdentifier: AnyUri = None                   # * optional 
+    primaryPurpose: SoftwarePurpose = None             # optional 
+    additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
+    concludedLicense: /Licensing/AnyLicenseInfo = None # optional 
+    declaredLicense: /Licensing/AnyLicenseInfo = None  # optional 
+    copyrightText: str = None                          # optional 
+    attributionText: str = None                        # optional 
+    originatedBy: SpdxId = None                        # * optional Set[1..*]
+    suppliedBy: SpdxId = None                          # * optional Set[1..*]
+    builtTime: DateTime = None                         # optional 
+    releaseTime: DateTime = None                       # optional 
+    validUntilTime: DateTime = None                    # optional 
+    standard: str = None                               # optional Set[1..*]
+    spdxId: SpdxId = None                              # * 
+    name: str = None                                   # optional 
+    summary: str = None                                # optional 
+    description: str = None                            # optional 
+    comment: str = None                                # optional 
+    creationInfo: CreationInfo = None                  # 
+    verifiedUsing: IntegrityMethod = None              # optional Set[1..*]
+    externalReference: ExternalReference = None        # optional Set[1..*]
+    externalIdentifier: ExternalIdentifier = None      # optional Set[1..*]
+    extension: Extension = None                        # optional Set[1..*]
+    namespaces: NamespaceMap = None                    # optional Set[1..*]
+    imports: ExternalMap = None                        # optional Set[1..*]
+```

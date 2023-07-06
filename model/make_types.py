@@ -76,12 +76,13 @@ def write_tools_class(model, mtypes, out):
                 ptype = typemap.get(v['type'], v['type'])
                 rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
                 ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
-                ptype = 'SpdxId' if k == 'spdxId' else ptype    # Patch until Element fixed in model
+                ptype = 'SpdxId' if k == 'spdxId' else ptype
                 prop = f'{k}: {ptype} = None'
                 opt = ' optional' if str(v['minCount']) == '0' else ''
                 pmin = v['minCount'] if (pmax := v['maxCount']) == '1' else '1'
                 mult = f'Set[{pmin}..{pmax}]' if pmax != '1' else ''
-                fp.write(f'    {prop:50} #{opt} {mult}\n')
+                gen = mtypes.get(ptype, {}).get('Metadata', {}).get('_generated', False)
+                fp.write(f'    {prop:50} #{" *" if gen else ""}{opt} {mult}\n')
         elif meta['_category'] == 'Vocabularies':
             fp.write(f'class {class_name}(Enum):\n')
             for n, v in enumerate(mtypes[model]['Entries'], start=1):
