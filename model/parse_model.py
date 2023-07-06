@@ -75,10 +75,15 @@ def load_model(fp):
 
 
 def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
+    # get model latest commit date
+    m = re.match(r'^(.*/spdx/spdx-3-model)/contents/(.+?)\s*$', SPDX_MODEL)
+    q = f'{m.group(1)}/commits?path={m.group(2)}'
+    commit = json.load(TextIOWrapper(urlopen(Request(q, headers=AUTH)), encoding='utf8'))[0]
+    out += '_' + commit['commit']['committer']['date'].replace(':', '').replace('-', '')
     os.makedirs(out, exist_ok=True)
 
     model_refs = {}
-    model_types = {'_defaults': {}}
+    model_types = {'_commit': commit['url'], '_defaults': {}}
     e1 = list_dir(model)
     assert len(e1['files']) == 0
     for d1 in e1['dirs']:
@@ -109,7 +114,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
                     else:
                         print('###### Ignored:', f3.name)
 
-    print(f'\n{len(model_types) - 1} Types in model')
+    print(f'\n{len(model_types) - 2} Types in model')
     with open(os.path.join(out, 'modelTypes.json'), 'w') as fp:
         json.dump(model_types, fp, indent=2)
 

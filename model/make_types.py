@@ -9,7 +9,7 @@ from collections import defaultdict
 from graphlib import TopologicalSorter
 
 OUT_DIR = 'generated'
-MODEL_SNAPSHOT = os.path.join(OUT_DIR, 'modelTypes.json')
+MODEL_SNAPSHOT = 'modelTypes.json'
 
 # Model types to be serialized as references, not inlined
 typerefs = {
@@ -116,7 +116,7 @@ def build_td(tname, model_types):
 
 def make_types(model: str = MODEL_SNAPSHOT, out: str = OUT_DIR) -> None:
     # Load model snapshot created by "parse_model"
-    with open(model) as fp:
+    with open(os.path.join(out, model)) as fp:
         model_types = json.load(fp)
     model_types.update(model_patches)
 
