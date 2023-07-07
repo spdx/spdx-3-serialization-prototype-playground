@@ -8,12 +8,12 @@ class AIPackage:
     typeOfModel: str = None                            # optional Set[1..*]
     informationAboutTraining: str = None               # optional 
     informationAboutApplication: str = None            # optional 
-    hyperparameter: /Core/DictionaryEntry = None       # optional Set[1..*]
+    hyperparameter: DictionaryEntry = None             # optional Set[1..*]
     modelDataPreprocessing: str = None                 # optional Set[1..*]
     modelExplainability: str = None                    # optional Set[1..*]
     sensitivePersonalInformation: PresenceType = None  # optional 
-    metricDecisionThreshold: /Core/DictionaryEntry = None # optional Set[1..*]
-    metric: /Core/DictionaryEntry = None               # optional Set[1..*]
+    metricDecisionThreshold: DictionaryEntry = None    # optional Set[1..*]
+    metric: DictionaryEntry = None                     # optional Set[1..*]
     domain: str = None                                 # optional Set[1..*]
     autonomyType: PresenceType = None                  # optional 
     safetyRiskAssessment: SafetyRiskAssessmentType = None # optional 
@@ -25,8 +25,8 @@ class AIPackage:
     contentIdentifier: AnyUri = None                   # * optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
-    concludedLicense: /Licensing/AnyLicenseInfo = None # optional 
-    declaredLicense: /Licensing/AnyLicenseInfo = None  # optional 
+    concludedLicense: SpdxId = None                    # * optional 
+    declaredLicense: SpdxId = None                     # * optional 
     copyrightText: str = None                          # optional 
     attributionText: str = None                        # optional 
     originatedBy: SpdxId = None                        # * optional Set[1..*]

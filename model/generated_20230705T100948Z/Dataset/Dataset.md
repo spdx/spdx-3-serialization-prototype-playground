@@ -8,7 +8,7 @@ class Dataset:
     datasetSize: xsd:nonNegativeInteger = None         # optional 
     datasetNoise: str = None                           # optional 
     dataPreprocessing: str = None                      # optional Set[1..*]
-    sensor: /Core/DictionaryEntry = None               # optional Set[1..*]
+    sensor: DictionaryEntry = None                     # optional Set[1..*]
     knownBias: str = None                              # optional Set[1..*]
     sensitivePersonalInformation: PresenceType = None  # optional 
     anonymizationMethodUsed: str = None                # optional Set[1..*]
@@ -23,8 +23,8 @@ class Dataset:
     contentIdentifier: AnyUri = None                   # * optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
-    concludedLicense: /Licensing/AnyLicenseInfo = None # optional 
-    declaredLicense: /Licensing/AnyLicenseInfo = None  # optional 
+    concludedLicense: SpdxId = None                    # * optional 
+    declaredLicense: SpdxId = None                     # * optional 
     copyrightText: str = None                          # optional 
     attributionText: str = None                        # optional 
     originatedBy: SpdxId = None                        # * optional Set[1..*]

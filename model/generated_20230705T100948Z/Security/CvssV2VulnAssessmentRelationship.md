@@ -5,11 +5,11 @@ class CvssV2VulnAssessmentRelationship:
     score: xsd:decimal = None                          # 
     severity: str = None                               # optional 
     vector: str = None                                 # optional 
-    assessedElement: /Core/Element = None              # optional 
-    publishedTime: /Core/DateTime = None               # optional 
-    suppliedBy: /Core/Agent = None                     # optional 
-    modifiedTime: /Core/DateTime = None                # optional 
-    withdrawnTime: /Core/DateTime = None               # optional 
+    assessedElement: SpdxId = None                     # * optional 
+    publishedTime: DateTime = None                     # optional 
+    suppliedBy: SpdxId = None                          # * optional 
+    modifiedTime: DateTime = None                      # optional 
+    withdrawnTime: DateTime = None                     # optional 
     from: SpdxId = None                                # * 
     to: SpdxId = None                                  # * optional Set[1..*]
     relationshipType: RelationshipType = None          # 

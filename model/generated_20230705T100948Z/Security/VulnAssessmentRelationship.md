@@ -2,11 +2,11 @@
 Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6b760ab87fee0d4a11e3f4) 2023-07-05T10:09:48Z
 ```
 class VulnAssessmentRelationship:
-    assessedElement: /Core/Element = None              # optional 
-    publishedTime: /Core/DateTime = None               # optional 
-    suppliedBy: /Core/Agent = None                     # optional 
-    modifiedTime: /Core/DateTime = None                # optional 
-    withdrawnTime: /Core/DateTime = None               # optional 
+    assessedElement: SpdxId = None                     # * optional 
+    publishedTime: DateTime = None                     # optional 
+    suppliedBy: SpdxId = None                          # * optional 
+    modifiedTime: DateTime = None                      # optional 
+    withdrawnTime: DateTime = None                     # optional 
     from: SpdxId = None                                # * 
     to: SpdxId = None                                  # * optional Set[1..*]
     relationshipType: RelationshipType = None          # 

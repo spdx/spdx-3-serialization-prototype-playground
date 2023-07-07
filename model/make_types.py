@@ -73,7 +73,7 @@ def write_tools_class(model, mtypes, out):
         if meta['_category'] == 'Classes':
             fp.write(f'class {class_name}:\n')
             for k, v in mtypes[model]['Properties'].items():
-                ptype = typemap.get(v['type'], v['type'])
+                ptype = typemap.get(v['type'], v['type']).split('/')[-1]
                 rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
                 ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
                 ptype = 'SpdxId' if k == 'spdxId' else ptype

@@ -10,8 +10,8 @@ class Package:
     contentIdentifier: AnyUri = None                   # * optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
-    concludedLicense: /Licensing/AnyLicenseInfo = None # optional 
-    declaredLicense: /Licensing/AnyLicenseInfo = None  # optional 
+    concludedLicense: SpdxId = None                    # * optional 
+    declaredLicense: SpdxId = None                     # * optional 
     copyrightText: str = None                          # optional 
     attributionText: str = None                        # optional 
     originatedBy: SpdxId = None                        # * optional Set[1..*]

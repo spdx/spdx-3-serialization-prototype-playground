@@ -6,11 +6,11 @@ class Build:
     buildId: str = None                                # optional 
     configSourceEntrypoint: str = None                 # optional Set[1..*]
     configSourceUri: AnyUri = None                     # * optional Set[1..*]
-    configSourceDigest: /Core/Hash = None              # optional Set[1..*]
-    parameters: /Core/DictionaryEntry = None           # optional Set[1..*]
-    buildStartTime: /Core/DateTime = None              # optional 
-    buildEndTime: /Core/DateTime = None                # optional 
-    environment: /Core/DictionaryEntry = None          # optional Set[1..*]
+    configSourceDigest: Hash = None                    # optional Set[1..*]
+    parameters: DictionaryEntry = None                 # optional Set[1..*]
+    buildStartTime: DateTime = None                    # optional 
+    buildEndTime: DateTime = None                      # optional 
+    environment: DictionaryEntry = None                # optional Set[1..*]
     spdxId: SpdxId = None                              # * 
     name: str = None                                   # optional 
     summary: str = None                                # optional 

@@ -2,12 +2,12 @@
 Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6b760ab87fee0d4a11e3f4) 2023-07-05T10:09:48Z
 ```
 class File:
-    contentType: /Core/MediaType = None                # optional 
+    contentType: MediaType = None                      # optional 
     contentIdentifier: AnyUri = None                   # * optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
-    concludedLicense: /Licensing/AnyLicenseInfo = None # optional 
-    declaredLicense: /Licensing/AnyLicenseInfo = None  # optional 
+    concludedLicense: SpdxId = None                    # * optional 
+    declaredLicense: SpdxId = None                     # * optional 
     copyrightText: str = None                          # optional 
     attributionText: str = None                        # optional 
     originatedBy: SpdxId = None                        # * optional Set[1..*]
