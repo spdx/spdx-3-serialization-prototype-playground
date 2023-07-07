@@ -18,8 +18,7 @@ typerefs = {
 
 # List datatypes and logical type names
 datatypes = {
-    'SpdxId': 'SpdxId',
-    'xsd:anyURI': 'AnyUri',
+    'xsd:anyURI': 'AnyURI',
     'xsd:integer': 'Integer',
     'xsd:string': 'String'
 }
@@ -73,8 +72,8 @@ def write_tools_class(model, mtypes, out):
         fp.write(f'## [{class_name}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
         if meta['_category'] == 'Classes':
             fp.write(f'class {class_name}:\n')
-            if (subtype := meta.get("SubclassOf", '')) in datatypes:
-                fp.write(f'    subtypeOf: {subtype}\n')
+            if (subtype := meta.get("SubclassOf", '')) in datatypes:    # TODO: implement subtype tree (fix AnyURI)
+                fp.write(f'    subtypeOf: {datatypes[subtype]}\n')
                 for k, v in mtypes[model].get("Format", {}).items():
                     fp.write(f'    {k}: {v}\n')
             else:

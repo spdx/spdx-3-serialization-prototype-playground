@@ -16,11 +16,11 @@ class Dataset:
     datasetUpdateMechanism: String = None              # optional 
     datasetAvailability: DatasetAvailabilityType = None # optional 
     packageVersion: String = None                      # optional 
-    downloadLocation: AnyUri = None                    # * optional 
-    packageUrl: AnyUri = None                          # * optional 
-    homePage: AnyUri = None                            # * optional 
+    downloadLocation: AnyURI = None                    # optional 
+    packageUrl: AnyURI = None                          # optional 
+    homePage: AnyURI = None                            # optional 
     sourceInfo: String = None                          # optional 
-    contentIdentifier: AnyUri = None                   # * optional 
+    contentIdentifier: AnyURI = None                   # optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
     concludedLicense: SpdxId = None                    # * optional 

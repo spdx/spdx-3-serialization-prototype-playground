@@ -4,7 +4,7 @@ Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6
 class Snippet:
     byteRange: PositiveIntegerRange = None             # optional 
     lineRange: PositiveIntegerRange = None             # optional 
-    contentIdentifier: AnyUri = None                   # * optional 
+    contentIdentifier: AnyURI = None                   # optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
     concludedLicense: SpdxId = None                    # * optional 
