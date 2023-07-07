@@ -3,7 +3,7 @@ Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6
 ```
 class EpssVulnAssessmentRelationship:
     probability: xsd:nonNegativeInteger = None         # 
-    severity: str = None                               # optional 
+    severity: String = None                            # optional 
     assessedElement: SpdxId = None                     # * optional 
     publishedTime: DateTime = None                     # optional 
     suppliedBy: SpdxId = None                          # * optional 
@@ -16,10 +16,10 @@ class EpssVulnAssessmentRelationship:
     startTime: DateTime = None                         # optional 
     endTime: DateTime = None                           # optional 
     spdxId: SpdxId = None                              # * 
-    name: str = None                                   # optional 
-    summary: str = None                                # optional 
-    description: str = None                            # optional 
-    comment: str = None                                # optional 
+    name: String = None                                # optional 
+    summary: String = None                             # optional 
+    description: String = None                         # optional 
+    comment: String = None                             # optional 
     creationInfo: CreationInfo = None                  # 
     verifiedUsing: IntegrityMethod = None              # optional Set[1..*]
     externalReference: ExternalReference = None        # optional Set[1..*]

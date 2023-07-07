@@ -16,11 +16,12 @@ typerefs = {
     "Element": "SpdxId"
 }
 
-# Map from xsd types to Python built-in or model-defined types
-typemap = {
+# List datatypes and logical type names
+datatypes = {
+    'SpdxId': 'SpdxId',
     'xsd:anyURI': 'AnyUri',
-    'xsd:integer': 'int',
-    'xsd:string': 'str'
+    'xsd:integer': 'Integer',
+    'xsd:string': 'String'
 }
 
 # Type definitions to patch missing classes in model
@@ -30,7 +31,7 @@ model_patches = {
         'Description': {},
         'Metadata': {
             'name': 'AnyUri',
-            'SubclassOf': 'none',
+            'SubclassOf': 'xsd:anyURI',
             '_modelRef': 'https://rdf.spdx.org/v3/Core/AnyUri',
             '_profile': 'Core',
             '_category': 'Classes',
@@ -45,7 +46,7 @@ model_patches = {
         'Description': {},
         'Metadata': {
             'name': 'SpdxId',
-            'SubclassOf': 'none',
+            'SubclassOf': 'xsd:anyURI',
             '_modelRef': 'https://rdf.spdx.org/v3/Core/SpdxId',
             '_profile': 'Core',
             '_category': 'Classes',
@@ -72,17 +73,22 @@ def write_tools_class(model, mtypes, out):
         fp.write(f'## [{class_name}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
         if meta['_category'] == 'Classes':
             fp.write(f'class {class_name}:\n')
-            for k, v in mtypes[model]['Properties'].items():
-                ptype = typemap.get(v['type'], v['type']).split('/')[-1]
-                rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
-                ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
-                ptype = 'SpdxId' if k == 'spdxId' else ptype
-                prop = f'{k}: {ptype} = None'
-                opt = ' optional' if str(v['minCount']) == '0' else ''
-                pmin = v['minCount'] if (pmax := v['maxCount']) == '1' else '1'
-                mult = f'Set[{pmin}..{pmax}]' if pmax != '1' else ''
-                gen = mtypes.get(ptype, {}).get('Metadata', {}).get('_generated', False)
-                fp.write(f'    {prop:50} #{" *" if gen else ""}{opt} {mult}\n')
+            if (subtype := meta.get("SubclassOf", '')) in datatypes:
+                fp.write(f'    subtypeOf: {subtype}\n')
+                for k, v in mtypes[model].get("Format", {}).items():
+                    fp.write(f'    {k}: {v}\n')
+            else:
+                for k, v in mtypes[model]['Properties'].items():
+                    ptype = datatypes.get(v['type'], v['type']).split('/')[-1]
+                    rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
+                    ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
+                    ptype = 'SpdxId' if k == 'spdxId' else ptype
+                    prop = f'{k}: {ptype} = None'
+                    opt = ' optional' if str(v['minCount']) == '0' else ''
+                    pmin = v['minCount'] if (pmax := v['maxCount']) == '1' else '1'
+                    mult = f'Set[{pmin}..{pmax}]' if pmax != '1' else ''
+                    gen = mtypes.get(ptype, {}).get('Metadata', {}).get('_generated', False)    # flag patches with '*'
+                    fp.write(f'    {prop:50} #{" *" if gen else ""}{opt} {mult}\n')
         elif meta['_category'] == 'Vocabularies':
             fp.write(f'class {class_name}(Enum):\n')
             for n, v in enumerate(mtypes[model]['Entries'], start=1):
@@ -90,16 +96,17 @@ def write_tools_class(model, mtypes, out):
         fp.write('```\n')
 
 
-def subclass(td):
+def superclass(td):
     return td['Metadata'].get('SubclassOf', '').split('/')[-1]
 
 
 # Fill in or update properties from superclass
 def build_td(tname, model_types):
     if td := model_types.get(tname, {}):
-        sd = model_types.get(subclass(td), {})
-        td['Metadata'].update({'_root_class': tname}) if tname in typerefs else {}
-        td['Metadata'].update({k: v for k, v in sd.get('Metadata', {}).items() if k == '_root_class'})
+        sd = model_types.get(superclass(td), {})
+        k = '_root_class'
+        td['Metadata'].update({k: tname}) if tname in typerefs else {}
+        td['Metadata'].update({k: sd['Metadata'][k]} if sd.get('Metadata', {}).get(k, '') else {})
         if 'Properties' in td:
             # Apply default property constraints
             for k, tdp in td['Properties'].items():
@@ -137,7 +144,7 @@ def make_types(model: str = MODEL_SNAPSHOT, out: str = OUT_DIR) -> None:
 
     # Update model_types to full type definitions after subclassing
     refs = defaultdict(list)
-    [refs[subclass(t)].append(t['Metadata']['name']) for k, t in model_types.items() if not k.startswith('_')]
+    [refs[superclass(t)].append(t['Metadata']['name']) for k, t in model_types.items() if not k.startswith('_')]
     [build_td(t, model_types) for t in reversed([e for e in TopologicalSorter(refs).static_order()])]
 
     print('Subclass tree:')

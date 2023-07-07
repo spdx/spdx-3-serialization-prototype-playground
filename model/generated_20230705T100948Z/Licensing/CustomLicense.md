@@ -2,18 +2,18 @@
 Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6b760ab87fee0d4a11e3f4) 2023-07-05T10:09:48Z
 ```
 class CustomLicense:
-    licenseText: str = None                            # 
+    licenseText: String = None                         # 
     isOsiApproved: xsd:boolean = None                  # optional 
     isFsfLibre: xsd:boolean = None                     # optional 
-    standardLicenseHeader: str = None                  # optional 
-    standardLicenseTemplate: str = None                # optional 
+    standardLicenseHeader: String = None               # optional 
+    standardLicenseTemplate: String = None             # optional 
     isDeprecatedLicenseId: xsd:boolean = None          # optional 
-    obsoletedBy: str = None                            # optional 
+    obsoletedBy: String = None                         # optional 
     spdxId: SpdxId = None                              # * 
-    name: str = None                                   # optional 
-    summary: str = None                                # optional 
-    description: str = None                            # optional 
-    comment: str = None                                # optional 
+    name: String = None                                # optional 
+    summary: String = None                             # optional 
+    description: String = None                         # optional 
+    comment: String = None                             # optional 
     creationInfo: CreationInfo = None                  # 
     verifiedUsing: IntegrityMethod = None              # optional Set[1..*]
     externalReference: ExternalReference = None        # optional Set[1..*]

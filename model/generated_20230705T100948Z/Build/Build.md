@@ -3,8 +3,8 @@ Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6
 ```
 class Build:
     buildType: AnyUri = None                           # * 
-    buildId: str = None                                # optional 
-    configSourceEntrypoint: str = None                 # optional Set[1..*]
+    buildId: String = None                             # optional 
+    configSourceEntrypoint: String = None              # optional Set[1..*]
     configSourceUri: AnyUri = None                     # * optional Set[1..*]
     configSourceDigest: Hash = None                    # optional Set[1..*]
     parameters: DictionaryEntry = None                 # optional Set[1..*]
@@ -12,10 +12,10 @@ class Build:
     buildEndTime: DateTime = None                      # optional 
     environment: DictionaryEntry = None                # optional Set[1..*]
     spdxId: SpdxId = None                              # * 
-    name: str = None                                   # optional 
-    summary: str = None                                # optional 
-    description: str = None                            # optional 
-    comment: str = None                                # optional 
+    name: String = None                                # optional 
+    summary: String = None                             # optional 
+    description: String = None                         # optional 
+    comment: String = None                             # optional 
     creationInfo: CreationInfo = None                  # 
     verifiedUsing: IntegrityMethod = None              # optional Set[1..*]
     externalReference: ExternalReference = None        # optional Set[1..*]

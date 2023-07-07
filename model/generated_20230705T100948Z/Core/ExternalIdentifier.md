@@ -3,8 +3,8 @@ Model: [828388b](https://github.com/spdx/spdx-3-model/commit/828388b98c2374f1af6
 ```
 class ExternalIdentifier:
     externalIdentifierType: ExternalIdentifierType = None # 
-    identifier: str = None                             # 
-    comment: str = None                                # optional 
+    identifier: String = None                          # 
+    comment: String = None                             # optional 
     identifierLocator: AnyUri = None                   # * optional Set[1..*]
     issuingAuthority: AnyUri = None                    # * optional 
 ```

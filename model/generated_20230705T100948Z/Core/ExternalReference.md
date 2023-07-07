@@ -5,5 +5,5 @@ class ExternalReference:
     externalReferenceType: ExternalReferenceType = None # optional 
     locator: AnyUri = None                             # * optional Set[1..*]
     contentType: MediaType = None                      # optional 
-    comment: str = None                                # optional 
+    comment: String = None                             # optional 
 ```
