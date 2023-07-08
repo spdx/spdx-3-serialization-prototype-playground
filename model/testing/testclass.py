@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, fields
-from generated.Core import CreationInfo, Element, Extension, ExternalIdentifier, ExternalMap, ExternalReference
+from model import String
+from generated.Core import CreationInfo, Extension, ExternalIdentifier, ExternalMap, ExternalReference
 from generated.Core import IntegrityMethod, NamespaceMap, SpdxId
 from generated.Software import SbomType
 
@@ -10,16 +11,16 @@ from generated.Software import SbomType
 @dataclass
 class Sbom:
     sbomType: SbomType = None                          # optional Set[1..*]
-    context: str = None                                # optional
+    context: String = None                             # optional
     element: SpdxId = None                             # * Set[1..*]
     rootElement: SpdxId = None                         # * Set[1..*]
     namespaces: NamespaceMap = None                    # optional Set[1..*]
     imports: ExternalMap = None                        # optional Set[1..*]
     spdxId: SpdxId = None                              # *
-    name: str = None                                   # optional
-    summary: str = None                                # optional
-    description: str = None                            # optional
-    comment: str = None                                # optional
+    name: String = None                                # optional
+    summary: String = None                             # optional
+    description: String = None                         # optional
+    comment: String = None                             # optional
     creationInfo: CreationInfo = None                  #
     verifiedUsing: IntegrityMethod = None              # optional Set[1..*]
     externalReference: ExternalReference = None        # optional Set[1..*]
@@ -41,3 +42,5 @@ if __name__ == '__main__':
     })
     for f in fields(sb):
         print(f.name, f.type)
+
+    print(sb)

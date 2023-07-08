@@ -18,19 +18,56 @@ typerefs = {
 
 # List datatypes and logical type names
 datatypes = {
-    'xsd:anyURI': 'AnyURI',
+    'xsd:string': 'String',
     'xsd:integer': 'Integer',
-    'xsd:string': 'String'
+    'xsd:anyURI': 'String'
+}
+
+python_class = {
+    'String': 'str',
+    'Integer': 'int',
 }
 
 # Type definitions to patch missing classes in model
 model_patches = {
+    'String': {
+        'Summary': {},
+        'Description': {},
+        'Metadata': {
+            'name': 'String',
+            '_profile': 'Core',
+            '_category': 'Classes',
+            '_file': 'String.md',
+            '_html': '',
+            '_generated': True
+        },
+        'Properties': {},
+        'Format': {
+            'schema': 'xsd:string'
+        }
+    },
+    'Integer': {
+        'Summary': {},
+        'Description': {},
+        'Metadata': {
+            'name': 'Integer',
+            '_profile': 'Core',
+            '_category': 'Classes',
+            '_file': 'Integer.md',
+            '_html': '',
+            '_generated': True
+        },
+        'Properties': {},
+        'Format': {
+            'schema': 'xsd:integer'
+        }
+    },
     'AnyUri': {
         'Summary': {},
         'Description': {},
         'Metadata': {
             'name': 'AnyUri',
-            'SubclassOf': 'xsd:anyURI',
+            'SubclassOf': 'String',
             '_modelRef': 'https://rdf.spdx.org/v3/Core/AnyUri',
             '_profile': 'Core',
             '_category': 'Classes',
@@ -38,14 +75,17 @@ model_patches = {
             '_html': '',
             '_generated': True
         },
-        'Properties': {}
+        'Properties': {},
+        'Format': {
+            'schema': 'xsd:anyURI'
+        }
     },
     'SpdxId': {
         'Summary': {},
         'Description': {},
         'Metadata': {
             'name': 'SpdxId',
-            'SubclassOf': 'xsd:anyURI',
+            'SubclassOf': 'AnyUri',
             '_modelRef': 'https://rdf.spdx.org/v3/Core/SpdxId',
             '_profile': 'Core',
             '_category': 'Classes',
@@ -53,7 +93,7 @@ model_patches = {
             '_html': '',
             '_generated': True
         },
-        'Properties': {}
+        'Properties': {},
     }
 }
 
@@ -71,12 +111,16 @@ def write_tools_class(model, mtypes, out):
         commit = f'[{mtypes["_commit"]["url"].split("/")[-1][:7]}]({mtypes["_commit"]["html_url"]})'
         fp.write(f'## [{class_name}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
         if meta['_category'] == 'Classes':
-            fp.write(f'class {class_name}:\n')
-            if (subtype := meta.get("SubclassOf", '')) in datatypes:    # TODO: implement subtype tree (fix AnyURI)
-                fp.write(f'    subtypeOf: {datatypes[subtype]}\n')
-                for k, v in mtypes[model].get("Format", {}).items():
-                    fp.write(f'    {k}: {v}\n')
+            if fmt := mtypes[model].get("Format", {}):
+                assert len(mtypes[model]['Properties']) == 0, f'Simple type {class_name} cannot have properties'
+                supertype = datatypes.get(sc := meta.get("SubclassOf", ''), sc)
+                fp.write(f'class {class_name}({supertype}):\n')
+                for k, v in fmt.items():
+                    if k in ['pattern', 'schema']:
+                        # assert supertype == 'String', f'{supertype} does not support {k}'
+                        fp.write(f'    {k}: {v}\n')
             else:
+                fp.write(f'class {class_name}:\n')
                 for k, v in mtypes[model]['Properties'].items():
                     ptype = datatypes.get(v['type'], v['type']).split('/')[-1]
                     rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
@@ -127,6 +171,11 @@ def build_td(tname, model_types):
                                 f'Cannot relax constraint: {tname} maxCount {p["maxCount"]} -> {tdp["maxCount"]}'
                         p = tdp
                     td['Properties'][k] = p
+
+        # Propagate simple datatype definitions to subclasses
+        fmt = {k:v for k, v in sd.get('Format', {}).items()}     # make a copy
+        fmt.update(td.get('Format', {}))
+        td.update({'Format': fmt})
     return td
 
 

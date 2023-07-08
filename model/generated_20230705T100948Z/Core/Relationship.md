@@ -9,10 +9,10 @@ class Relationship:
     startTime: DateTime = None                         # optional 
     endTime: DateTime = None                           # optional 
     spdxId: SpdxId = None                              # * 
-    name: String = None                                # optional 
-    summary: String = None                             # optional 
-    description: String = None                         # optional 
-    comment: String = None                             # optional 
+    name: String = None                                # * optional 
+    summary: String = None                             # * optional 
+    description: String = None                         # * optional 
+    comment: String = None                             # * optional 
     creationInfo: CreationInfo = None                  # 
     verifiedUsing: IntegrityMethod = None              # optional Set[1..*]
     externalReference: ExternalReference = None        # optional Set[1..*]
