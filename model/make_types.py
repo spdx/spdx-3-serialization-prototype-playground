@@ -111,16 +111,15 @@ def write_tools_class(model, mtypes, out):
         commit = f'[{mtypes["_commit"]["url"].split("/")[-1][:7]}]({mtypes["_commit"]["html_url"]})'
         fp.write(f'## [{class_name}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
         if meta['_category'] == 'Classes':
+            supertype = datatypes.get(sc := meta.get("SubclassOf", ''), sc)
+            fp.write(f'class {class_name}({supertype}):\n')
             if fmt := mtypes[model].get("Format", {}):
                 assert len(mtypes[model]['Properties']) == 0, f'Simple type {class_name} cannot have properties'
-                supertype = datatypes.get(sc := meta.get("SubclassOf", ''), sc)
-                fp.write(f'class {class_name}({supertype}):\n')
                 for k, v in fmt.items():
                     if k in ['pattern', 'schema']:
                         # assert supertype == 'String', f'{supertype} does not support {k}'
                         fp.write(f'    {k}: {v}\n')
             else:
-                fp.write(f'class {class_name}:\n')
                 for k, v in mtypes[model]['Properties'].items():
                     ptype = datatypes.get(v['type'], v['type']).split('/')[-1]
                     rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
@@ -173,7 +172,7 @@ def build_td(tname, model_types):
                     td['Properties'][k] = p
 
         # Propagate simple datatype definitions to subclasses
-        fmt = {k:v for k, v in sd.get('Format', {}).items()}     # make a copy
+        fmt = {k: v for k, v in sd.get('Format', {}).items()}     # make a copy
         fmt.update(td.get('Format', {}))
         td.update({'Format': fmt})
     return td
