@@ -23,26 +23,97 @@
         "software",
         "licensing"
       ],
-      "dataLicense": "https://spdx.org/licenses/CC0-1.0",
-      "comment": "This is the SPDX-2.3 JSON example converted to SPDX-3.0. As there is currently no closure on how to treat licenses, they are omitted here for now."
+      "dataLicense": "https://spdx.org/licenses/CC0-1.0"
+    },
+    {
+      "@id": "_:creationInfo2",
+      "type": "CreationInfo",
+      "specVersion": "3.0.0",
+      "created": "2010-02-10T00:00:00Z",
+      "createdBy": [
+        "spdx-example:SPDXRef-Actor-JoeReviewer"
+      ],
+      "createdUsing": [
+        "spdx-example:SPDXRef-Actor-LicenseFind-1.0"
+      ],
+      "profile": [
+        "core",
+        "software",
+        "licensing"
+      ],
+      "dataLicense": "https://spdx.org/licenses/CC0-1.0"
+    },
+    {
+      "@id": "_:creationInfo3",
+      "type": "CreationInfo",
+      "specVersion": "3.0.0",
+      "created": "2011-03-13T00:00:00Z",
+      "createdBy": [
+        "spdx-example:SPDXRef-Actor-SuzanneReviewer"
+      ],
+      "createdUsing": [
+        "spdx-example:SPDXRef-Actor-LicenseFind-1.0"
+      ],
+      "profile": [
+        "core",
+        "software",
+        "licensing"
+      ],
+      "dataLicense": "https://spdx.org/licenses/CC0-1.0"
+    },
+    {
+      "@id": "_:creationInfo4",
+      "type": "CreationInfo",
+      "specVersion": "3.0.0",
+      "created": "2011-01-29T18:30:22Z",
+      "createdBy": [
+        "spdx-example:SPDXRef-Actor-PackageCommenter"
+      ],
+      "createdUsing": [
+        "spdx-example:SPDXRef-Actor-LicenseFind-1.0"
+      ],
+      "profile": [
+        "core",
+        "software",
+        "licensing"
+      ],
+      "dataLicense": "https://spdx.org/licenses/CC0-1.0"
+    },
+    {
+      "@id": "_:creationInfo5",
+      "type": "CreationInfo",
+      "specVersion": "3.0.0",
+      "created": "2011-01-29T18:30:22Z",
+      "createdBy": [
+        "spdx-example:SPDXRef-Actor-FileCommenter"
+      ],
+      "createdUsing": [
+        "spdx-example:SPDXRef-Actor-LicenseFind-1.0"
+      ],
+      "profile": [
+        "core",
+        "software",
+        "licensing"
+      ],
+      "dataLicense": "https://spdx.org/licenses/CC0-1.0"
     },
     {
       "type": "Tool",
       "spdxId": "spdx-example:SPDXRef-Actor-LicenseFind-1.0",
-      "name": "LicenseFind-1.0",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo1",
+      "name": "LicenseFind-1.0"
     },
     {
       "type": "Organization",
       "spdxId": "spdx-example:SPDXRef-Actor-ExampleCodeInspect",
-      "name": "ExampleCodeInspect",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo1",
+      "name": "ExampleCodeInspect"
     },
     {
       "type": "Person",
       "spdxId": "spdx-example:SPDXRef-Actor-JaneDoe",
-      "name": "Jane Doe",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo1",
+      "name": "Jane Doe"
     },
     {
       "type": "SpdxDocument",
@@ -112,6 +183,7 @@
     {
       "type": "Person",
       "spdxId": "spdx-example:SPDXRef-Actor-JaneDoe-jane.doe@example.com",
+      "creationInfo": "_:creationInfo1",
       "name": "Jane Doe",
       "externalIdentifier": [
         {
@@ -119,12 +191,12 @@
           "externalIdentifierType": "email",
           "identifier": "jane.doe@example.com"
         }
-      ],
-      "creationInfo": "_:creationInfo1"
+      ]
     },
     {
       "type": "Organization",
       "spdxId": "spdx-example:SPDXRef-Actor-ExampleCodeInspect-contact@example.com",
+      "creationInfo": "_:creationInfo1",
       "name": "ExampleCodeInspect",
       "externalIdentifier": [
         {
@@ -132,12 +204,12 @@
           "externalIdentifierType": "email",
           "identifier": "contact@example.com"
         }
-      ],
-      "creationInfo": "_:creationInfo1"
+      ]
     },
     {
       "type": "Package",
       "spdxId": "spdx-example:SPDXRef-Package",
+      "creationInfo": "_:creationInfo1",
       "name": "glibc",
       "summary": "GNU C library.",
       "description": "The GNU C Library defines functions that are specified by the ISO C standard, as well as additional features specific to POSIX and other derivatives of the Unix operating system, and extensions specific to GNU systems.",
@@ -179,37 +251,35 @@
       "builtTime": "2011-01-29T18:30:22Z",
       "releaseTime": "2012-01-29T18:30:22Z",
       "validUntilTime": "2014-01-29T18:30:22Z",
-      "purpose": [
-        "source"
-      ],
+      "primaryPurpose": "source",
       "copyrightText": "Copyright 2008-2010 John Smith",
       "attributionText": "The GNU C Library is free software.  See the file COPYING.LIB for copying conditions, and LICENSES for notices about a few contributions that require these additional notices to be distributed.  License copyright years may be listed using range notation, e.g., 1996-2015, indicating that every year in the range, inclusive, is a copyrightable year that would otherwise be listed individually.",
       "packageVersion": "2.11.1",
       "downloadLocation": "http://ftp.gnu.org/gnu/glibc/glibc-ports-2.15.tar.gz",
       "homepage": "http://ftp.gnu.org/gnu/glibc",
-      "sourceInfo": "uses glibc-2_11-branch from git://sourceware.org/git/glibc.git.",
-      "creationInfo": "_:creationInfo1"
+      "sourceInfo": "uses glibc-2_11-branch from git://sourceware.org/git/glibc.git."
     },
     {
       "type": "Package",
       "spdxId": "spdx-example:SPDXRef-fromDoap-1",
+      "creationInfo": "_:creationInfo1",
       "name": "Apache Commons Lang",
-      "homepage": "http://commons.apache.org/proper/commons-lang/",
-      "creationInfo": "_:creationInfo1"
+      "homepage": "http://commons.apache.org/proper/commons-lang/"
     },
     {
       "type": "Package",
       "spdxId": "spdx-example:SPDXRef-fromDoap-0",
+      "creationInfo": "_:creationInfo1",
       "name": "Jena",
       "packageVersion": "3.12.0",
       "downloadLocation": "https://search.maven.org/remotecontent?filepath=org/apache/jena/apache-jena/3.12.0/apache-jena-3.12.0.tar.gz",
       "packageUrl": "pkg:maven/org.apache.jena/apache-jena@3.12.0",
-      "homepage": "http://www.openjena.org/",
-      "creationInfo": "_:creationInfo1"
+      "homepage": "http://www.openjena.org/"
     },
     {
       "type": "Package",
       "spdxId": "spdx-example:SPDXRef-Saxon",
+      "creationInfo": "_:creationInfo1",
       "name": "Saxon",
       "description": "The Saxon package is a collection of tools for processing XML documents.",
       "verifiedUsing": [
@@ -222,12 +292,12 @@
       "copyrightText": "Copyright Saxonica Ltd",
       "packageVersion": "8.8",
       "downloadLocation": "https://sourceforge.net/projects/saxon/files/Saxon-B/8.8.0.7/saxonb8-8-0-7j.zip/download",
-      "homepage": "http://saxon.sourceforge.net/",
-      "creationInfo": "_:creationInfo1"
+      "homepage": "http://saxon.sourceforge.net/"
     },
     {
       "type": "File",
       "spdxId": "spdx-example:SPDXRef-DoapSource",
+      "creationInfo": "_:creationInfo1",
       "name": "./src/org/spdx/parser/DOAPProject.java",
       "verifiedUsing": [
         {
@@ -241,6 +311,7 @@
     {
       "type": "File",
       "spdxId": "spdx-example:SPDXRef-CommonsLangSrc",
+      "creationInfo": "_:creationInfo1",
       "name": "./lib-source/commons-lang3-3.1-sources.jar",
       "comment": "This file is used by Jena",
       "verifiedUsing": [
@@ -250,12 +321,12 @@
           "hashValue": "c2b4e1c67a2d28fced849ee1bb76e7391b93f125"
         }
       ],
-      "copyrightText": "Copyright 2001-2011 The Apache Software Foundation",
-      "creationInfo": "_:creationInfo1"
+      "copyrightText": "Copyright 2001-2011 The Apache Software Foundation"
     },
     {
       "type": "File",
       "spdxId": "spdx-example:SPDXRef-JenaLib",
+      "creationInfo": "_:creationInfo1",
       "name": "./lib-source/jena-2.6.3-sources.jar",
       "comment": "This file belongs to Jena",
       "verifiedUsing": [
@@ -270,6 +341,7 @@
     {
       "type": "File",
       "spdxId": "spdx-example:SPDXRef-Specification",
+      "creationInfo": "_:creationInfo1",
       "name": "./docs/myspec.pdf",
       "comment": "Specification Documentation",
       "verifiedUsing": [
@@ -278,12 +350,12 @@
           "algorithm": "sha1",
           "hashValue": "fff4e1c67a2d28fced849ee1bb76e7391b93f125"
         }
-      ],
-      "creationInfo": "_:creationInfo1"
+      ]
     },
     {
       "type": "File",
       "spdxId": "spdx-example:SPDXRef-File",
+      "creationInfo": "_:creationInfo1",
       "name": "./package/foo.c",
       "comment": "The concluded license was taken from the package level that the file was included in.\nThis information was found in the COPYING.txt file in the xyz directory.",
       "verifiedUsing": [
@@ -298,100 +370,102 @@
           "hashValue": "624c1abb3664f4b35547e7c73864ad24"
         }
       ],
-      "copyrightText": "Copyright 2008-2010 John Smith",
-      "creationInfo": "_:creationInfo1"
+      "copyrightText": "Copyright 2008-2010 John Smith"
     },
     {
       "type": "Snippet",
       "spdxId": "spdx-example:SPDXRef-Snippet",
+      "creationInfo": "_:creationInfo1",
       "name": "from linux kernel",
       "comment": "This snippet was identified as significant and highlighted in this Apache-2.0 file, when a commercial scanner identified it as being derived from file foo.c in package xyz which is licensed under GPL-2.0.",
       "copyrightText": "Copyright 2008-2010 John Smith",
       "byteRange": {
+        "type": "PositiveIntegerRange",
         "begin": 310,
         "end": 420
       },
       "lineRange": {
+        "type": "PositiveIntegerRange",
         "begin": 5,
         "end": 23
-      },
-      "creationInfo": "_:creationInfo1"
+      }
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-0",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-DOCUMENT",
       "to": [
         "spdx-example:SPDXRef-Package"
       ],
-      "relationshipType": "contains",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "contains"
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-1",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-DOCUMENT",
       "to": [
         "spdx-example:DocumentRef-spdx-tool-1.2:SPDXRef-ToolsElement"
       ],
-      "relationshipType": "copy",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "copy"
     },
     {
       "type": "SoftwareDependencyRelationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-2",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-Package",
       "to": [
         "spdx-example:SPDXRef-Saxon"
       ],
       "relationshipType": "dependsOn",
-      "softwareLinkage": "dynamic",
-      "creationInfo": "_:creationInfo1"
+      "softwareLinkage": "dynamic"
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-4",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-JenaLib",
       "to": [
         "spdx-example:SPDXRef-Package"
       ],
-      "relationshipType": "contains",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "contains"
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-5",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-Specification",
       "to": [
         "spdx-example:SPDXRef-fromDoap-0"
       ],
-      "relationshipType": "specificationFor",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "specificationFor"
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-6",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-fromDoap-0",
       "to": [
         "spdx-example:SPDXRef-File"
       ],
-      "relationshipType": "generates",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "generates"
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-8",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-DOCUMENT",
       "to": [
         "spdx-example:SPDXRef-File",
         "spdx-example:SPDXRef-Package"
       ],
-      "relationshipType": "describes",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "describes"
     },
     {
       "type": "Relationship",
       "spdxId": "spdx-example:SPDXRef-Relationship-12",
+      "creationInfo": "_:creationInfo1",
       "from": "spdx-example:SPDXRef-Package",
       "to": [
         "spdx-example:SPDXRef-Specification",
@@ -399,72 +473,87 @@
         "spdx-example:SPDXRef-JenaLib",
         "spdx-example:SPDXRef-DoapSource"
       ],
-      "relationshipType": "contains",
-      "creationInfo": "_:creationInfo1"
+      "relationshipType": "contains"
     },
     {
       "type": "Annotation",
       "spdxId": "spdx-example:SPDXRef-Annotation-0",
+      "creationInfo": {
+        "type": "CreationInfo",
+        "specVersion": "3.0.0",
+        "created": "2010-01-29T18:30:22Z",
+        "createdBy": [
+          "spdx-example:SPDXRef-Actor-JaneDoe"
+        ],
+        "createdUsing": [
+          "spdx-example:SPDXRef-Actor-LicenseFind-1.0"
+        ],
+        "profile": [
+          "core",
+          "software",
+          "licensing"
+        ],
+        "dataLicense": "https://spdx.org/licenses/CC0-1.0"
+      },
       "annotationType": "other",
       "subject": "spdx-example:SPDXRef-DOCUMENT",
-      "statement": "Document level annotation",
-      "creationInfo": "_:creationInfo1"
+      "statement": "Document level annotation"
     },
     {
       "type": "Person",
       "spdxId": "spdx-example:SPDXRef-Actor-JoeReviewer",
-      "name": "Joe Reviewer",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo2",
+      "name": "Joe Reviewer"
     },
     {
       "type": "Annotation",
       "spdxId": "spdx-example:SPDXRef-Annotation-1",
+      "creationInfo": "_:creationInfo2",
       "annotationType": "review",
       "subject": "spdx-example:SPDXRef-DOCUMENT",
-      "statement": "This is just an example.  Some of the non-standard licenses look like they are actually BSD 3 clause licenses",
-      "creationInfo": "_:creationInfo1"
+      "statement": "This is just an example.  Some of the non-standard licenses look like they are actually BSD 3 clause licenses"
     },
     {
       "type": "Person",
       "spdxId": "spdx-example:SPDXRef-Actor-SuzanneReviewer",
-      "name": "Suzanne Reviewer",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo3",
+      "name": "Suzanne Reviewer"
     },
     {
       "type": "Annotation",
       "spdxId": "spdx-example:SPDXRef-Annotation-2",
+      "creationInfo": "_:creationInfo3",
       "annotationType": "review",
       "subject": "spdx-example:SPDXRef-DOCUMENT",
-      "statement": "Another example reviewer.",
-      "creationInfo": "_:creationInfo1"
+      "statement": "Another example reviewer."
     },
     {
       "type": "Person",
       "spdxId": "spdx-example:SPDXRef-Actor-PackageCommenter",
-      "name": "Package Commenter",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo4",
+      "name": "Package Commenter"
     },
     {
       "type": "Annotation",
       "spdxId": "spdx-example:SPDXRef-Annotation-3",
+      "creationInfo": "_:creationInfo4",
       "annotationType": "other",
       "subject": "spdx-example:SPDXRef-Package",
-      "statement": "Package level annotation",
-      "creationInfo": "_:creationInfo1"
+      "statement": "Package level annotation"
     },
     {
       "type": "Person",
       "spdxId": "spdx-example:SPDXRef-Actor-FileCommenter",
-      "name": "File Commenter",
-      "creationInfo": "_:creationInfo1"
+      "creationInfo": "_:creationInfo5",
+      "name": "File Commenter"
     },
     {
       "type": "Annotation",
       "spdxId": "spdx-example:SPDXRef-Annotation-4",
+      "creationInfo": "_:creationInfo5",
       "annotationType": "other",
       "subject": "spdx-example:SPDXRef-File",
-      "statement": "File level annotation",
-      "creationInfo": "_:creationInfo1"
+      "statement": "File level annotation"
     }
   ]
 }
