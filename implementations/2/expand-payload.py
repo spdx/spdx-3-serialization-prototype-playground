@@ -3,7 +3,7 @@ import os
 from urllib.parse import urlparse
 
 OUT = 'out'
-SPDXID_PROPERTIES = ['spdxId']
+SPDXID_PROPERTIES = ['spdxId']      # Add all properties of type Element from model
 
 
 def expand_iri(iri: str, nsmap: dict) -> str:
@@ -17,8 +17,15 @@ def expand_iri(iri: str, nsmap: dict) -> str:
 
 
 def expand_element(element: dict, nsmap: dict = {}, cimap: dict = {}) -> dict:
+    """
+    Expand a compact Payload Element to a full Element by updating SpdxIds and CreationInfo
+    """
     e = dict(element)   # Make a copy that can be modified
-    if nsmap:
+
+    ci = e.get('creationInfo', '')  # Fill in compacted creation info
+    e['creationInfo'] = cimap[ci] if isinstance(ci, str) else ci
+
+    if nsmap:   # Validate format of namespaceMap
         assert '' in nsmap, 'namespaceMap has no default IRI'
         for k, v in nsmap.items():
             assert v[-1] in '/#', f'namespaceMap {k} has no separator: {v}'
@@ -26,8 +33,6 @@ def expand_element(element: dict, nsmap: dict = {}, cimap: dict = {}) -> dict:
     for p in SPDXID_PROPERTIES:     # Fill in compacted IRIs
         e[p] = expand_iri(e[p], nsmap)
 
-    ci = e.get('creationInfo', '')  # Fill in compacted creation info
-    e['creationInfo'] = cimap[ci] if isinstance(ci, str) else ci
     return e
 
 
