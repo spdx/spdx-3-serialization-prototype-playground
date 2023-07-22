@@ -1,0 +1,108 @@
+[
+  {
+    "spdxId": "urn:sbom-acme-application-8f833b36-20e3-11ee-be56-0242ac120002",
+    "type": "SpdxDocument",
+    "element": [
+      "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+      "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+      "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002"
+    ],
+    "rootElement": [
+      "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002"
+    ],
+    "creationInfo": {
+      "specVersion": "3.0.0",
+      "created": "2023-07-21T15:57:00Z",
+      "createdBy": [
+        "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ],
+      "profile": [
+        "Core",
+        "Software"
+      ],
+      "dataLicense": "CC0-1.0",
+      "createdUsing": []
+    },
+    "name": "acme-application"
+  },
+  {
+    "spdxId": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+    "type": "Package",
+    "creationInfo": {
+      "specVersion": "3.0.0",
+      "created": "2023-07-21T15:57:00Z",
+      "createdBy": [
+        "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ],
+      "profile": [
+        "Core",
+        "Software"
+      ],
+      "dataLicense": "CC0-1.0",
+      "createdUsing": []
+    },
+    "name": "acme-application"
+  },
+  {
+    "spdxId": "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+    "type": "Person",
+    "creationInfo": {
+      "specVersion": "3.0.0",
+      "created": "2023-07-21T15:57:00Z",
+      "createdBy": [
+        "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ],
+      "profile": [
+        "Core",
+        "Software"
+      ],
+      "dataLicense": "CC0-1.0",
+      "createdUsing": []
+    }
+  },
+  {
+    "spdxId": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+    "type": "Agent",
+    "creationInfo": {
+      "specVersion": "3.0.0",
+      "created": "2023-07-21T15:57:00Z",
+      "createdBy": [
+        "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ],
+      "profile": [
+        "Core",
+        "Software"
+      ],
+      "dataLicense": "CC0-1.0",
+      "createdUsing": []
+    }
+  },
+  {
+    "spdxId": "urn:relationship-acme-app-8f833b36-20e3-11ee-be56-0242ac120002",
+    "type": "Relationship",
+    "from": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+    "relationshipType": "availableFrom",
+    "to": [
+      "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+      "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+    ],
+    "creationInfo": {
+      "specVersion": "3.0.0",
+      "created": "2023-07-21T15:57:00Z",
+      "createdBy": [
+        "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ],
+      "profile": [
+        "Core",
+        "Software"
+      ],
+      "dataLicense": "CC0-1.0",
+      "createdUsing": []
+    }  
+  }
+]
