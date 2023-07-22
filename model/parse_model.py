@@ -101,8 +101,8 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
             # print(f'. {d2.name}')
             e3 = list_dir(d2.path)
             assert len(e3['dirs']) == 0
-            assert d2.name in {'Classes', 'Individuals', 'Properties', 'Vocabularies'}
-            if d2.name in {'Classes', 'Vocabularies'}:
+            assert d2.name in {'Classes', 'Datatypes', 'Vocabularies', 'Properties', 'Individuals'}
+            if d2.name in {'Classes', 'Datatypes', 'Vocabularies'}:
                 for f3 in e3['files']:
                     if not f3.name.startswith('_'):
                         model = load_model(open_file(f3))

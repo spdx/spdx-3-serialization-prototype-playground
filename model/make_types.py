@@ -36,12 +36,11 @@ model_patches = {
         'Metadata': {
             'name': 'String',
             '_profile': 'Core',
-            '_category': 'Classes',
+            '_category': 'Datatypes',
             '_file': 'String.md',
             '_html': '',
             '_generated': True
         },
-        'Properties': {},
         'Format': {
             'schema': 'xsd:string'
         }
@@ -52,12 +51,11 @@ model_patches = {
         'Metadata': {
             'name': 'Integer',
             '_profile': 'Core',
-            '_category': 'Classes',
+            '_category': 'Datatypes',
             '_file': 'Integer.md',
             '_html': '',
             '_generated': True
         },
-        'Properties': {},
         'Format': {
             'schema': 'xsd:integer'
         }
@@ -70,12 +68,11 @@ model_patches = {
             'SubclassOf': 'String',
             '_modelRef': 'https://rdf.spdx.org/v3/Core/AnyUri',
             '_profile': 'Core',
-            '_category': 'Classes',
+            '_category': 'Datatypes',
             '_file': 'AnyUri.md',
             '_html': '',
             '_generated': True
         },
-        'Properties': {},
         'Format': {
             'schema': 'xsd:anyURI'
         }
@@ -88,52 +85,53 @@ model_patches = {
             'SubclassOf': 'AnyUri',
             '_modelRef': 'https://rdf.spdx.org/v3/Core/SpdxId',
             '_profile': 'Core',
-            '_category': 'Classes',
+            '_category': 'Datatypes',
             '_file': 'SpdxId.md',
             '_html': '',
             '_generated': True
-        },
-        'Properties': {},
+        }
     }
 }
 
 
-def write_tools_class(model, mtypes, out):
-    meta = mtypes[model]['Metadata']
+def write_tools_class(tname, mtypes, out):
+    tdef = mtypes[tname]
+    meta = tdef['Metadata']
+    assert meta['name'] == tname, f'{tname}: Metadata name mismatch {meta["name"]}'
     for m in meta:
         assert m in {'name', 'SubclassOf', 'Instantiability',
                      '_modelRef', '_profile', '_category', '_file', '_html', '_generated', '_root_class'}
 
     pdir = os.path.join(out, meta['_profile'])
     os.makedirs(pdir, exist_ok=True)
-    class_name = meta['name']
     with open(os.path.join(pdir, meta['name']) + '.md', 'w') as fp:
         commit = f'[{mtypes["_commit"]["url"].split("/")[-1][:7]}]({mtypes["_commit"]["html_url"]})'
-        fp.write(f'## [{class_name}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
+        fp.write(f'## [{tname}]({meta["_html"]})\nModel: {commit} {mtypes["_commit"]["date"]}\n```\n')
+        supertype = datatypes.get(sc := meta.get("SubclassOf", ''), sc)
+        fp.write(f'class {tname}({supertype}):\n')
         if meta['_category'] == 'Classes':
-            supertype = datatypes.get(sc := meta.get("SubclassOf", ''), sc)
-            fp.write(f'class {class_name}({supertype}):\n')
-            if fmt := mtypes[model].get("Format", {}):
-                assert len(mtypes[model]['Properties']) == 0, f'Simple type {class_name} cannot have properties'
-                for k, v in fmt.items():
-                    if k in ['pattern', 'schema']:
-                        # assert supertype == 'String', f'{supertype} does not support {k}'
-                        fp.write(f'    {k}: {v}\n')
-            else:
-                for k, v in mtypes[model]['Properties'].items():
-                    ptype = datatypes.get(v['type'], v['type']).split('/')[-1]
-                    rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
-                    ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
-                    ptype = 'SpdxId' if k == 'spdxId' else ptype
-                    prop = f'{k}: {ptype} = None'
-                    opt = ' optional' if str(v['minCount']) == '0' else ''
-                    pmin = v['minCount'] if (pmax := v['maxCount']) == '1' else '1'
-                    mult = f'Set[{pmin}..{pmax}]' if pmax != '1' else ''
-                    gen = mtypes.get(ptype, {}).get('Metadata', {}).get('_generated', False)    # flag patches with '*'
-                    fp.write(f'    {prop:50} #{" *" if gen else ""}{opt} {mult}\n')
+            assert 'Format' not in tdef, f'Complex class {tname} cannot have formats'
+            for k, v in tdef['Properties'].items():
+                ptype = datatypes.get(v['type'], v['type']).split('/')[-1]
+                rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
+                ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
+                ptype = 'SpdxId' if k == 'spdxId' else ptype
+                prop = f'{k}: {ptype} = None'
+                opt = ' optional' if str(v['minCount']) == '0' else ''
+                pmin = v['minCount'] if (pmax := v['maxCount']) == '1' else '1'
+                mult = f'Set[{pmin}..{pmax}]' if pmax != '1' else ''
+                gen = mtypes.get(ptype, {}).get('Metadata', {}).get('_generated', False)    # flag patches with '*'
+                fp.write(f'    {prop:50} #{" *" if gen else ""}{opt} {mult}\n')
+        elif meta['_category'] == 'Datatypes':
+            assert 'Properties' not in tdef, f'Simple datatype {tdef} cannot have properties'
+            for k, v in tdef['Format'].items():
+                if k in ['pattern', 'schema']:
+                    # assert supertype == 'String', f'{supertype} does not support {k}'
+                    fp.write(f'    {k}: {v}\n')
+                else:
+                    assert f'Unknown format {k} in {tdef}'
         elif meta['_category'] == 'Vocabularies':
-            fp.write(f'class {class_name}(Enum):\n')
-            for n, v in enumerate(mtypes[model]['Entries'], start=1):
+            for n, v in enumerate(tdef['Entries'], start=1):
                 fp.write(f'    {v} = {n}\n')
         fp.write('```\n')
 
@@ -174,7 +172,8 @@ def build_td(tname, model_types):
         # Propagate simple datatype definitions to subclasses
         fmt = {k: v for k, v in sd.get('Format', {}).items()}     # make a copy
         fmt.update(td.get('Format', {}))
-        td.update({'Format': fmt})
+        if fmt:
+            td.update({'Format': fmt})
     return td
 
 
