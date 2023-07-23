@@ -27,3 +27,5 @@ Payload elements with full SpdxId and CreationInfo are returned unchanged.
 ## Usage
 1. Create compacted .json files with filename beginning with "payload"
 2. Run `expand-payload.py` to create corresponding "element" .json files in directory "out"
+
+This code assumes that the payload is correct. Production code would check for payload errors and handle them properly.

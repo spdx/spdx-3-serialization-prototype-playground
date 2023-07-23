@@ -30,8 +30,8 @@ def expand_element(element: dict, nsmap: dict = {}, cimap: dict = {}) -> dict:
         for k, v in nsmap.items():
             assert v[-1] in '/#', f'namespaceMap {k} has no separator: {v}'
 
-    for p in SPDXID_PROPERTIES:     # Fill in compacted IRIs
-        e[p] = expand_iri(e[p], nsmap)
+        for p in SPDXID_PROPERTIES:     # Fill in compacted IRIs
+            e[p] = expand_iri(e[p], nsmap)
 
     return e
 
