@@ -3,7 +3,7 @@ Model: [fa68f94](https://github.com/spdx/spdx-3-model/commit/fa68f942ae1a0d0e8f0
 ```
 class ExternalReference(none):
     externalReferenceType: ExternalReferenceType = None # optional 
-    locator: String = None                             # * optional Set[1..*]
+    locator: AnyURI = None                             # optional Set[1..*]
     contentType: MediaType = None                      # optional 
     comment: String = None                             # * optional 
 ```
