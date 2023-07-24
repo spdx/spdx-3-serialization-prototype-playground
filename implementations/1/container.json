@@ -1,0 +1,100 @@
+{
+  "spdx_id": "urn:sbom-container-2df5b73b-e79b-4fbb-8a18-a60c383e6ce9",
+  "name": "alpine-container",
+  "element": [
+    "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+    "urn:openssl-35e25462-2f81-4ef4-80f1-135b85632b43",
+    "urn:relationship-alphine-dfd8aed6-6899-4c01-8e56-01da8f3fccb1",
+    "urn-relationship-openssl-287295f7-894f-461b-a35a-22dbc37ae3f7"
+  ],
+  "root_element": [
+    "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d"
+  ],
+  "creation_info": {
+    "spdx_id": "urn:depcreation-eb9d3ab5-2cc4-4e32-882a-4252fc8e0b1b",
+    "spec_version": "3.0.0",
+    "created": "2023-07-24T18:32:08Z",
+    "created_by": [
+      "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+    ],
+    "profile": [
+      "CORE",
+      "SOFTWARE"
+    ],
+    "data_license": "CC0-1.0",
+    "created_using": []
+  },
+  "elements": [
+    {
+      "spdx_id": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+      "name": "alpine-container",
+      "creation_info": {
+        "spdx_id": "urn:depcreation-eb9d3ab5-2cc4-4e32-882a-4252fc8e0b1b",
+        "spec_version": "3.0.0",
+        "created": "2023-07-24T18:32:08Z",
+        "created_by": [
+          "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+        ],
+        "profile": [
+          "CORE",
+          "SOFTWARE"
+        ],
+        "data_license": "CC0-1.0",
+        "created_using": []
+      }
+    },
+    {
+      "spdx_id": "urn:openssl-35e25462-2f81-4ef4-80f1-135b85632b43",
+      "name": "openssl",
+      "creation_info": {
+        "spdx_id": "urn:depcreation-eb9d3ab5-2cc4-4e32-882a-4252fc8e0b1b",
+        "spec_version": "3.0.0",
+        "created": "2023-07-24T18:32:08Z",
+        "created_by": [
+          "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+        ],
+        "profile": [
+          "CORE",
+          "SOFTWARE"
+        ],
+        "data_license": "CC0-1.0",
+        "created_using": []
+      }
+    },
+    {
+      "spdx_id": "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8",
+      "creation_info": {
+        "spdx_id": "urn:depcreation-eb9d3ab5-2cc4-4e32-882a-4252fc8e0b1b",
+        "spec_version": "3.0.0",
+        "created": "2023-07-24T18:32:08Z",
+        "created_by": [
+          "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+        ],
+        "profile": [
+          "CORE",
+          "SOFTWARE"
+        ],
+        "data_license": "CC0-1.0",
+        "created_using": []
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "spdx_id": "urn:relationship-alphine-dfd8aed6-6899-4c01-8e56-01da8f3fccb1",
+      "from_element": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+      "relationship_type": "AVAILABLE_FROM",
+      "to": [
+        "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+      ]
+    },
+    {
+      "spdx_id": "urn-relationship-openssl-287295f7-894f-461b-a35a-22dbc37ae3f7",
+      "from_element": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+      "relationship_type": "CONTAINS",
+      "to": [
+        "urn:openssl-35e25462-2f81-4ef4-80f1-135b85632b43"
+      ]
+    }
+  ]
+}
