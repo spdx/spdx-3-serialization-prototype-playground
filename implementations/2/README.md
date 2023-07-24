@@ -29,3 +29,8 @@ Payload elements with full SpdxId and CreationInfo are returned unchanged.
 2. Run `expand-payload.py` to create corresponding "element" .json files in directory "out"
 
 This code assumes that the payload is correct. Production code would check for payload errors and handle them properly.
+
+## Use Cases
+1. Single payload with five elements: `payload_simple_acme.json`
+2. Two payloads: `payload_simple_acme_A.json` imports two elements from `payload_simple_acme_B.json`
+using an SpdxDocument element for payload B.
