@@ -5,6 +5,6 @@ class ExternalIdentifier():
     externalIdentifierType: ExternalIdentifierType = None # 
     identifier: String = None                          # * 
     comment: String = None                             # * optional 
-    identifierLocator: String = None                   # * optional Set[1..*]
-    issuingAuthority: String = None                    # * optional 
+    identifierLocator: AnyURI = None                   # optional Set[1..*]
+    issuingAuthority: AnyURI = None                    # optional 
 ```

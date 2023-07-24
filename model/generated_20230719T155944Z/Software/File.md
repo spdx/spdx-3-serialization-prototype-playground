@@ -3,7 +3,7 @@ Model: [fa68f94](https://github.com/spdx/spdx-3-model/commit/fa68f942ae1a0d0e8f0
 ```
 class File(/Software/SoftwareArtifact):
     contentType: MediaType = None                      # optional 
-    contentIdentifier: String = None                   # * optional 
+    contentIdentifier: AnyURI = None                   # optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
     concludedLicense: SpdxId = None                    # * optional 

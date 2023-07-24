@@ -18,11 +18,11 @@ class AIPackage(/Software/Package):
     autonomyType: PresenceType = None                  # optional 
     safetyRiskAssessment: SafetyRiskAssessmentType = None # optional 
     packageVersion: String = None                      # * optional 
-    downloadLocation: String = None                    # * optional 
-    packageUrl: String = None                          # * optional 
-    homePage: String = None                            # * optional 
+    downloadLocation: AnyURI = None                    # optional 
+    packageUrl: AnyURI = None                          # optional 
+    homePage: AnyURI = None                            # optional 
     sourceInfo: String = None                          # * optional 
-    contentIdentifier: String = None                   # * optional 
+    contentIdentifier: AnyURI = None                   # optional 
     primaryPurpose: SoftwarePurpose = None             # optional 
     additionalPurpose: SoftwarePurpose = None          # optional Set[1..*]
     concludedLicense: SpdxId = None                    # * optional 

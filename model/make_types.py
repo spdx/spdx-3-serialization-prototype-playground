@@ -20,7 +20,7 @@ typerefs = {
 datatypes = {
     'xsd:string': 'String',
     'xsd:integer': 'Integer',
-    'xsd:anyURI': 'String'
+    'xsd:anyURI': 'AnyURI'
 }
 
 python_class = {
