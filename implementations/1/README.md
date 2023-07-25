@@ -8,3 +8,4 @@ These examples are meant to illustrate how tools may create SPDX 3.0 documents a
 - `simple.py` is used to produce the `simple_acme.json` file. It requires Python3.10 to run. In your environment, run `simple.py | jq | tee <output_file_name>.json` to get the example content.
 - `depcontainer.py` is used to produce the `container.json` file.
 - Both `simple.py` and `depcontainer.py` assume the same `CreationInfo` for all the elements generated. Both implementations faithfully reproduce the `CreationInfo` for all serialized elements.
+- `simple_compact.py` is used to produce `simple_compact.json`. Here, the `CreationInfo` is applied only at the document level. This assumes the `CreationInfo` applies to all elements unless the elements themselves have a `creation_info` blob.
