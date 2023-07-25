@@ -2,10 +2,10 @@
 Model: [fa68f94](https://github.com/spdx/spdx-3-model/commit/fa68f942ae1a0d0e8f05df6526f147cbe64183ed) 2023-07-19T15:59:44Z
 ```
 class Build(/Core/Element):
-    buildType: AnyURI = None                           # 
+    buildType: AnyUri = None                           # * 
     buildId: String = None                             # * optional 
     configSourceEntrypoint: String = None              # * optional Set[1..*]
-    configSourceUri: AnyURI = None                     # optional Set[1..*]
+    configSourceUri: AnyUri = None                     # * optional Set[1..*]
     configSourceDigest: Hash = None                    # optional Set[1..*]
     parameters: DictionaryEntry = None                 # optional Set[1..*]
     buildStartTime: DateTime = None                    # optional 
