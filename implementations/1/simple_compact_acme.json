@@ -1,19 +1,19 @@
 {
-  "spdx_id": "urn:sbom-acme-application-8f833b36-20e3-11ee-be56-0242ac120002",
+  "spdxId": "urn:sbom-acme-application-8f833b36-20e3-11ee-be56-0242ac120002",
   "name": "acme-application",
   "element": [
     "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
     "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
     "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002"
   ],
-  "root_element": [
+  "rootElement": [
     "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002"
   ],
-  "creation_info": {
-    "spdx_id": "urn:sbom-acme-timestamp-5cfc33f3-9a0b-436c-8d81-bc8d9ed8ae25",
-    "spec_version": "3.0.0",
-    "created": "2023-07-25T14:14:25Z",
-    "created_by": [
+  "creationInfo": {
+    "spdxId": "urn:sbom-acme-timestamp-5cfc33f3-9a0b-436c-8d81-bc8d9ed8ae25",
+    "specVersion": "3.0.0",
+    "created": "2023-07-28T16:02:59Z",
+    "createdBy": [
       "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
       "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
     ],
@@ -21,26 +21,26 @@
       "CORE",
       "SOFTWARE"
     ],
-    "data_license": "CC0-1.0",
-    "created_using": []
+    "dataLicense": "CC0-1.0",
+    "createdUsing": []
   },
   "elements": [
     {
-      "spdx_id": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+      "spdxId": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
       "name": "acme-application"
     },
     {
-      "spdx_id": "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002"
+      "spdxId": "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002"
     },
     {
-      "spdx_id": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      "spdxId": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
     }
   ],
   "relationships": [
     {
-      "spdx_id": "urn:relationship-acme-app-8f833b36-20e3-11ee-be56-0242ac120002",
-      "from_element": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
-      "relationship_type": "AVAILABLE_FROM",
+      "spdxId": "urn:relationship-acme-app-8f833b36-20e3-11ee-be56-0242ac120002",
+      "fromElement": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+      "relationshipType": "AVAILABLE_FROM",
       "to": [
         "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
         "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"

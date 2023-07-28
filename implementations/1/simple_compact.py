@@ -19,40 +19,41 @@ def created_dict(cinfo):
     profiles = []
     for pro in cinfo.profile:
         profiles.append(pro.name)
-    return({"spdx_id": cinfo.spdx_id,
-            "spec_version": f"{cinfo.spec_version.major}.{cinfo.spec_version.minor}.{cinfo.spec_version.patch}",
+    return({"spdxId": cinfo.spdx_id,
+            "specVersion": f"{cinfo.spec_version.major}.{cinfo.spec_version.minor}.{cinfo.spec_version.patch}",
             "created": cinfo.created.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "created_by": cinfo.created_by,
+            "createdBy": cinfo.created_by,
             "profile": profiles,
-            "data_license": cinfo.data_license,
-            "created_using": cinfo.created_using})
+            "dataLicense": cinfo.data_license,
+            "createdUsing": cinfo.created_using})
 
 
+# Everything else does not need to have a creation_info
 def person_dict(p):
-    return({"spdx_id": p.spdx_id})
+    return({"spdxId": p.spdx_id})
 
 
 def org_dict(o):
-    return({"spdx_id": o.spdx_id})
+    return({"spdxId": o.spdx_id})
 
 
 def app_dict(app):
-    return({"spdx_id": app.spdx_id,
+    return({"spdxId": app.spdx_id,
             "name": app.name})
 
 
 def doc_dict(doc):
-    return({"spdx_id": doc.spdx_id,
+    return({"spdxId": doc.spdx_id,
             "name": doc.name,
             "element": doc.element,
-            "root_element": doc.root_element,
-            "creation_info": created_dict(doc.creation_info)})
+            "rootElement": doc.root_element,
+            "creationInfo": created_dict(doc.creation_info)})
 
 
 def relationship_dict(rel):
-    return({"spdx_id": rel.spdx_id,
-            "from_element": rel.from_element,
-            "relationship_type": rel.relationship_type.name,
+    return({"spdxId": rel.spdx_id,
+            "fromElement": rel.from_element,
+            "relationshipType": rel.relationship_type.name,
             "to": rel.to})
 
 
