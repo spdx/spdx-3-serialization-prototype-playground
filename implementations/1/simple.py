@@ -5,9 +5,10 @@ from spdx_tools.spdx3 import model
 from spdx_tools.spdx3.model import software
 
 
-def mint(agents):
+def mint(agents, spdx_id):
     # Create a CreationInfo object to be used throughout the document
-    return model.CreationInfo(spec_version=Version('3.0.0'),
+    return model.CreationInfo(spdx_id=spdx_id,
+                              spec_version=Version('3.0.0'),
                               created=datetime.utcnow(),
                               created_by=agents,
                               profile=[model.ProfileIdentifierType.CORE,
@@ -18,52 +19,55 @@ def created_dict(cinfo):
     profiles = []
     for pro in cinfo.profile:
         profiles.append(pro.name)
-    return({"spec_version": f"{cinfo.spec_version.major}.{cinfo.spec_version.minor}.{cinfo.spec_version.patch}",
+    return({"spdxId": cinfo.spdx_id,
+            "specVersion": f"{cinfo.spec_version.major}.{cinfo.spec_version.minor}.{cinfo.spec_version.patch}",
             "created": cinfo.created.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "created_by": cinfo.created_by,
+            "createdBy": cinfo.created_by,
             "profile": profiles,
-            "data_license": cinfo.data_license,
-            "created_using": cinfo.created_using})
+            "dataLicense": cinfo.data_license,
+            "createdUsing": cinfo.created_using})
 
 
 def person_dict(p):
-    return({"spdx_id": p.spdx_id,
-            "creation_info": created_dict(p.creation_info)})
+    return({"spdxId": p.spdx_id,
+            "creationInfo": created_dict(p.creation_info)})
 
 
 def org_dict(o):
-    return({"spdx_id": o.spdx_id,
-            "creation_info": created_dict(o.creation_info)})
+    return({"spdxId": o.spdx_id,
+            "creationInfo": created_dict(o.creation_info)})
 
 
 def app_dict(app):
-    return({"spdx_id": app.spdx_id,
+    return({"spdxId": app.spdx_id,
             "name": app.name,
-            "creation_info": created_dict(app.creation_info)})
+            "creationInfo": created_dict(app.creation_info)})
 
 
 def doc_dict(doc):
-    return({"spdx_id": doc.spdx_id,
+    return({"spdxId": doc.spdx_id,
             "name": doc.name,
             "element": doc.element,
-            "root_element": doc.root_element,
-            "creation_info": created_dict(doc.creation_info)})
+            "rootElement": doc.root_element,
+            "creationInfo": created_dict(doc.creation_info)})
 
 
 def relationship_dict(rel):
-    return({"spdx_id": rel.spdx_id,
-            "from_element": rel.from_element,
-            "relationship_type": rel.relationship_type.name,
-            "to": rel.to})
+    return({"spdxId": rel.spdx_id,
+            "fromElement": rel.from_element,
+            "relationshipType": rel.relationship_type.name,
+            "to": rel.to,
+            "creationInfo": created_dict(rel.creation_info)})
 
 
 def generate():
     # Ids use URNs: https://en.wikipedia.org/wiki/Uniform_Resource_Name
     person_id = "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002"
     org_id = "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+    ts_id = "urn:sbom-acme-timestamp-5cfc33f3-9a0b-436c-8d81-bc8d9ed8ae25"
     # Assuming CreationInfo is mandatory for all elements
     # Creating the whole thing in one shot
-    ts = mint([person_id, org_id])
+    ts = mint([person_id, org_id], ts_id)
     # Now create the agent objects
     person = model.Person(person_id,
                           creation_info=ts)
