@@ -93,7 +93,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
     e1 = list_dir(model)
     assert len(e1['files']) == 0
     for d1 in e1['dirs']:
-        print(f'{d1.name}')
+        print(f'\n{d1.name}', end='')
         e2 = list_dir(d1.path)
         assert len(e2['files']) == 1
         model_types['_defaults'][d1.name] = load_model(open_file(e2['files'][0]))
@@ -105,6 +105,7 @@ def make_classes(model: str = SPDX_MODEL, out: str = OUTDIR) -> None:
             if d2.name in {'Classes', 'Datatypes', 'Vocabularies'}:
                 for f3 in e3['files']:
                     if not f3.name.startswith('_'):
+                        print('.', end='')
                         model = load_model(open_file(f3))
                         meta = model['Metadata']
                         if meta['name'] in model_refs:
