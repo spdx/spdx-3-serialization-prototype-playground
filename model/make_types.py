@@ -76,20 +76,6 @@ model_patches = {
         'Format': {
             'schema': 'xsd:anyURI'
         }
-    },
-    'SpdxId': {
-        'Summary': {},
-        'Description': {},
-        'Metadata': {
-            'name': 'SpdxId',
-            'SubclassOf': 'AnyUri',
-            '_modelRef': 'https://rdf.spdx.org/v3/Core/SpdxId',
-            '_profile': 'Core',
-            '_category': 'Datatypes',
-            '_file': 'SpdxId.md',
-            '_html': '',
-            '_generated': True
-        }
     }
 }
 
@@ -111,7 +97,7 @@ def write_tools_class(tname, mtypes, out):
         fp.write(f'class {tname}({supertype}):\n')
         if meta['_category'] == 'Classes':
             assert 'Format' not in tdef, f'Complex class {tname} cannot have formats'
-            for k, v in tdef['Properties'].items():
+            for k, v in tdef.get('Properties', {}).items():
                 ptype = datatypes.get(v['type'], v['type']).split('/')[-1]
                 rc = mtypes.get(ptype, {}).get('Metadata', {}).get('_root_class', '')
                 ptype = typerefs.get(rc, ptype)                 # Use SpdxId for all Element subclasses
@@ -144,10 +130,13 @@ def superclass(td):
 def build_td(tname, model_types):
     if td := model_types.get(tname, {}):
         sd = model_types.get(superclass(td), {})
-        k = '_root_class'
+        k = '_root_class'   # Track types to be serialized as references rather than values
         td['Metadata'].update({k: tname}) if tname in typerefs else {}
         td['Metadata'].update({k: sd['Metadata'][k]} if sd.get('Metadata', {}).get(k, '') else {})
-        if 'Properties' in td:
+
+        if td['Metadata']['_category'] in 'Classes':
+            if 'Properties' not in td:
+                td['Properties'] = {}
             # Apply default property constraints
             for k, tdp in td['Properties'].items():
                 p = {'minCount': 0, 'maxCount': '*'}
@@ -155,25 +144,32 @@ def build_td(tname, model_types):
                 if p['maxCount'] != '*':
                     assert int(p['minCount']) <= int(p['maxCount'])
                 td['Properties'][k] = p
-            # Propagate properties to subclasses
-            if sd:
-                for k, p in sd['Properties'].items():
-                    if k in td['Properties'] and p != td['Properties'][k]:
-                        tdp = td['Properties'][k]    # ensure restrictions
-                        assert tdp['type'] == p['type'], f'Property type mismatch: {tname} {tdp["type"]} != {p["type"]}'
-                        assert int(tdp['minCount']) >= int(p['minCount']),\
-                            f'Cannot relax constraint: {tname} minCount {p["minCount"]} -> {tdp["minCount"]}'
-                        if p['maxCount'] != '*':
-                            assert int(tdp['maxCount']) <= int(p['maxCount']),\
-                                f'Cannot relax constraint: {tname} maxCount {p["maxCount"]} -> {tdp["maxCount"]}'
-                        p = tdp
-                    td['Properties'][k] = p
 
-        # Propagate simple datatype definitions to subclasses
-        fmt = {k: v for k, v in sd.get('Format', {}).items()}     # make a copy
-        fmt.update(td.get('Format', {}))
-        if fmt:
-            td.update({'Format': fmt})
+            # Propagate properties to subclasses, apply direct restrictions
+            for k, p in sd.get('Properties', {}).items():
+                if k in td.get('Properties', {}) and p != td['Properties'][k]:
+                    tdp = td['Properties'][k]    # ensure restrictions are valid
+                    assert tdp['type'] == p['type'], f'Property type mismatch: {tname} {tdp["type"]} != {p["type"]}'
+                    assert int(tdp['minCount']) >= int(p['minCount']),\
+                        f'Cannot relax constraint: {tname} minCount {p["minCount"]} -> {tdp["minCount"]}'
+                    if p['maxCount'] != '*':
+                        assert int(tdp['maxCount']) <= int(p['maxCount']),\
+                            f'Cannot relax constraint: {tname} maxCount {p["maxCount"]} -> {tdp["maxCount"]}'
+                    p = tdp
+                td['Properties'][k] = p
+
+            # Apply property restrictions specified indirectly
+            for k, tdp in td.get('External properties restrictions', {}).items():
+                assert len(kf := k.split('/')) == 4, f'Invalid property restriction {k}'
+                assert kf[-1] in td['Properties'], f'Restricting non-existent property {k} in {td["Metadata"]["name"]}'
+                td['Properties'][kf[-1]].update(tdp)    # Should validate restriction as in direct case
+
+        elif td['Metadata']['_category'] in 'Datatypes':
+            # Propagate simple datatype definitions to subclasses
+            fmt = {k: v for k, v in sd.get('Format', {}).items()}     # make a copy
+            fmt.update(td.get('Format', {}))
+            if fmt:
+                td.update({'Format': fmt})
     return td
 
 
