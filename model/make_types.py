@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import copy
 import fire
 import json
 import os
@@ -159,10 +160,13 @@ def build_td(tname, model_types):
                 td['Properties'][k] = p
 
             # Apply property restrictions specified indirectly
-            for k, tdp in td.get('External properties restrictions', {}).items():
+            for k, r in td.get('External properties restrictions', {}).items():
                 assert len(kf := k.split('/')) == 4, f'Invalid property restriction {k}'
-                assert kf[-1] in td['Properties'], f'Restricting non-existent property {k} in {td["Metadata"]["name"]}'
-                td['Properties'][kf[-1]].update(tdp)    # Should validate restriction as in direct case
+                if not (tdp := td.get('Properties', {})):
+                    raise ValueError(f'Restricting non-existent property {k} in {td["Metadata"]["name"]}')
+                for p, v in r.items():
+                    pn = dict(tdp[kf[-1]])  # Make a modifiable copy
+                    pn[p] = v
 
         elif td['Metadata']['_category'] in 'Datatypes':
             # Propagate simple datatype definitions to subclasses
