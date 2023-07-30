@@ -17,7 +17,7 @@ class File(/Software/SoftwareArtifact):
     validUntilTime: DateTime = None                    # optional 
     standard: String = None                            # * optional Set[1..*]
     spdxId: SpdxId = None                              # 
-    name: String = None                                # * optional 
+    name: String = None                                # * 
     summary: String = None                             # * optional 
     description: String = None                         # * optional 
     comment: String = None                             # * optional 

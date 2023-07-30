@@ -13,7 +13,7 @@ class VexNotAffectedVulnAssessmentRelationship(VexVulnAssessmentRelationship):
     modifiedTime: DateTime = None                      # optional 
     withdrawnTime: DateTime = None                     # optional 
     from: SpdxId = None                                # 
-    to: SpdxId = None                                  # optional Set[1..*]
+    to: SpdxId = None                                  # Set[1..*]
     relationshipType: RelationshipType = None          # 
     completeness: RelationshipCompleteness = None      # optional 
     startTime: DateTime = None                         # optional 

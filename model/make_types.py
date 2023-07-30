@@ -167,6 +167,7 @@ def build_td(tname, model_types):
                 for p, v in r.items():
                     pn = dict(tdp[kf[-1]])  # Make a modifiable copy
                     pn[p] = v
+                    tdp[kf[-1]] = pn
 
         elif td['Metadata']['_category'] in 'Datatypes':
             # Propagate simple datatype definitions to subclasses
