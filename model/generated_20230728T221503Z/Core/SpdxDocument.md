@@ -7,7 +7,7 @@ class SpdxDocument(Bundle):
     rootElement: SpdxId = None                         # Set[1..*]
     imports: ExternalMap = None                        # optional Set[1..*]
     spdxId: SpdxId = None                              # 
-    name: String = None                                # * optional 
+    name: String = None                                # * 
     summary: String = None                             # * optional 
     description: String = None                         # * optional 
     comment: String = None                             # * optional 
