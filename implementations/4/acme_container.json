@@ -1,0 +1,89 @@
+{
+  "spdxId": "urn:sbom-acme-container-1.3-4ab0bd4b-064b-4e36-94ac-3459a2425ba8",
+  "name": "acme-container",
+  "element": [
+    "urn:product-acme-container-1.3-58636866-50ba-4a50-a11b-818ff4f5bdc7",
+    "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+  ],
+  "rootElement": [
+    "urn:product-acme-container-1.3-58636866-50ba-4a50-a11b-818ff4f5bdc7"
+  ],
+  "creationInfo": {
+    "specVersion": "3.0.0",
+    "created": "2023-08-17T17:24:16Z",
+    "createdBy": [
+      "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+    ],
+    "profile": [
+      "core",
+      "software"
+    ],
+    "dataLicense": "CC0-1.0",
+    "createdUsing": [
+      "app_in_container.py"
+    ]
+  },
+  "type": "SpdxDocument",
+  "elements": {
+    "person": [],
+    "organization": [
+      {
+        "spdxId": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+        "type": "Organization"
+      }
+    ],
+    "package": [
+      {
+        "spdxId": "urn:product-acme-container-1.3-58636866-50ba-4a50-a11b-818ff4f5bdc7",
+        "name": "acme/acme-container",
+        "packageVersion": "1.3",
+        "type": "Package"
+      }
+    ]
+  },
+  "imports": [
+    {
+      "externalId": "urn:external-sbom-acme-app-5a6e83d0-e085-43d3-93dd-d53db6a6b19c",
+      "verifiedUsing": [
+        {
+          "hashAlgorithm": "sha256",
+          "hashValue": "899001fbd7aceca269b5819c06af37bfb8b229f548edaf93e44bb903650203c6",
+          "type": "Hash"
+        }
+      ],
+      "locationHint": "acme_compact.json",
+      "type": "ExternalMap"
+    },
+    {
+      "externalId": "urn:external-sbom-alpine-d847e068-e912-4a61-9d4c-0b13ac56d565",
+      "verifiedUsing": [
+        {
+          "hashAlgorithm": "sha256",
+          "hashValue": "3fd608cc719c5e952b72021c745d4ad291a5a3400de33363515a8d0285abf6a4",
+          "type": "Hash"
+        }
+      ],
+      "locationHint": "alpine_compact.json",
+      "type": "ExternalMap"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxId": "urn:relationship-acme-supplier-c6484017-073c-4741-9af0-126358382b28",
+      "fromElement": "urn:product-acme-container-1.3-58636866-50ba-4a50-a11b-818ff4f5bdc7",
+      "relationshipType": "availablefrom",
+      "to": [
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ]
+    },
+    {
+      "spdxId": "urn:relationship-container-9c83c478-0338-4930-89ea-b74585e29a8f",
+      "fromElement": "urn:product-acme-container-1.3-58636866-50ba-4a50-a11b-818ff4f5bdc7",
+      "relationshipType": "contains",
+      "to": [
+        "urn:external-sbom-alpine-d847e068-e912-4a61-9d4c-0b13ac56d565",
+        "urn:external-sbom-acme-app-5a6e83d0-e085-43d3-93dd-d53db6a6b19c"
+      ]
+    }
+  ]
+}

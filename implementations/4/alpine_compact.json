@@ -1,0 +1,82 @@
+{
+  "spdxId": "urn:sbom-container-2df5b73b-e79b-4fbb-8a18-a60c383e6ce9",
+  "name": "alpine-container",
+  "element": [
+    "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+    "urn:openssl-3.0.4-cf812fb8-20e3-11ee-be56-0242ac120002",
+    "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8",
+    "urn:openssl.org-0d106fcc-20e6-11ee-be56-0242ac120002"
+  ],
+  "rootElement": [
+    "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d"
+  ],
+  "creationInfo": {
+    "specVersion": "3.0.0",
+    "created": "2023-08-17T17:16:39Z",
+    "createdBy": [
+      "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+    ],
+    "profile": [
+      "core",
+      "software"
+    ],
+    "dataLicense": "CC0-1.0",
+    "createdUsing": [
+      "container_compact.py"
+    ]
+  },
+  "type": "SpdxDocument",
+  "elements": {
+    "person": [],
+    "organization": [
+      {
+        "spdxId": "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8",
+        "type": "Organization"
+      },
+      {
+        "spdxId": "urn:openssl.org-0d106fcc-20e6-11ee-be56-0242ac120002",
+        "type": "Organization"
+      }
+    ],
+    "package": [
+      {
+        "spdxId": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+        "name": "alpine-container",
+        "packageVersion": null,
+        "type": "Package"
+      },
+      {
+        "spdxId": "urn:openssl-3.0.4-cf812fb8-20e3-11ee-be56-0242ac120002",
+        "name": "openssl",
+        "packageVersion": "3.0.4",
+        "type": "Package"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "spdxId": "urn:relationship-alpine-dfd8aed6-6899-4c01-8e56-01da8f3fccb1",
+      "fromElement": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+      "relationshipType": "availablefrom",
+      "to": [
+        "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+      ]
+    },
+    {
+      "spdxId": "urn:relationship-openssl-287295f7-894f-461b-a35a-22dbc37ae3f7",
+      "fromElement": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+      "relationshipType": "contains",
+      "to": [
+        "urn:openssl-3.0.4-cf812fb8-20e3-11ee-be56-0242ac120002"
+      ]
+    },
+    {
+      "spdxId": "urn:relationship-openssl-supplier-2e8c0ad2-0541-4ea5-99db-fab4a5e7395e",
+      "fromElement": "urn:openssl-3.0.4-cf812fb8-20e3-11ee-be56-0242ac120002",
+      "relationshipType": "availablefrom",
+      "to": [
+        "urn:openssl.org-0d106fcc-20e6-11ee-be56-0242ac120002"
+      ]
+    }
+  ]
+}
