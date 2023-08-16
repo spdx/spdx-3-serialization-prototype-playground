@@ -1,0 +1,62 @@
+{
+  "spdxId": "urn:sbom-acme-application-8f833b36-20e3-11ee-be56-0242ac120002",
+  "name": "acme-application",
+  "element": [
+    "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+    "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+    "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002"
+  ],
+  "rootElement": [
+    "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002"
+  ],
+  "creationInfo": {
+    "specVersion": "3.0.0",
+    "created": "2023-08-17T15:19:31Z",
+    "createdBy": [
+      "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+      "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+    ],
+    "profile": [
+      "core",
+      "software"
+    ],
+    "dataLicense": "CC0-1.0",
+    "createdUsing": [
+      "app_compact.py"
+    ]
+  },
+  "type": "SpdxDocument",
+  "elements": {
+    "person": [
+      {
+        "spdxId": "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "type": "Person"
+      }
+    ],
+    "organization": [
+      {
+        "spdxId": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+        "type": "Organization"
+      }
+    ],
+    "package": [
+      {
+        "spdxId": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+        "name": "acme-application",
+        "packageVersion": "1.3",
+        "type": "Package"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "spdxId": "urn:relationship-acme-app-8f833b36-20e3-11ee-be56-0242ac120002",
+      "fromElement": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+      "relationshipType": "availablefrom",
+      "to": [
+        "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+      ]
+    }
+  ]
+}
