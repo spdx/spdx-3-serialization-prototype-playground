@@ -43,10 +43,10 @@ def generate():
     # We link the documents using the ExternalMap
     app_emap = model.ExternalMap(app_sbom_ext_id,
                                  [app_sbom_integrity],
-                                 "acme_compact.json")
+                                 "file:./acme_compact.json")
     alpine_emap = model.ExternalMap(alpine_sbom_ext_id,
                                     [alpine_sbom_integrity],
-                                    "alpine_compact.json")
+                                    "file:./alpine_compact.json")
 
     # Relationship is used to define the relationships among the elements
     rel_supplier = model.Relationship(rel_supplier_id,
