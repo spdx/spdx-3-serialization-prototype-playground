@@ -1,0 +1,179 @@
+{
+  "spdxId": "urn:sbom-envelope-04bf01ba-eb2a-409a-89c2-47a650e9bfd8",
+  "name": "containerized acme application",
+  "element": [
+    "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+  ],
+  "rootElement": [],
+  "creationInfo": {
+    "specVersion": "3.0.0",
+    "created": "2023-09-19T21:08:54Z",
+    "createdBy": [
+      "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+    ],
+    "profile": [
+      "core",
+      "software"
+    ],
+    "dataLicense": "CC0-1.0",
+    "createdUsing": [
+      "combine_docs.py"
+    ]
+  },
+  "type": "SpdxDocument",
+  "elements": {
+    "person": [
+      {
+        "spdxId": "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+        "type": "Person",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T15:19:31Z",
+          "createdBy": [
+            "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+            "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      }
+    ],
+    "organization": [
+      {
+        "spdxId": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+        "type": "Organization",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-09-19T21:08:54Z",
+          "createdBy": [
+            "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": [
+            "combine_docs.py"
+          ]
+        }
+      },
+      {
+        "spdxId": "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002",
+        "type": "Organization",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T15:19:31Z",
+          "createdBy": [
+            "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+            "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      },
+      {
+        "spdxId": "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8",
+        "type": "Organization",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T17:16:39Z",
+          "createdBy": [
+            "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      },
+      {
+        "spdxId": "urn:openssl.org-0d106fcc-20e6-11ee-be56-0242ac120002",
+        "type": "Organization",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T17:16:39Z",
+          "createdBy": [
+            "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      }
+    ],
+    "package": [
+      {
+        "spdxId": "urn:product-acme-application-1.3-8f833b36-20e3-11ee-be56-0242ac120002",
+        "name": "acme-application",
+        "packageVersion": null,
+        "type": "Package",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T15:19:31Z",
+          "createdBy": [
+            "urn:jane-doe-1@acme.com-76010e36-20e3-11ee-be56-0242ac120002",
+            "urn:acme.com-4fe40e24-20e3-11ee-be56-0242ac120002"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      },
+      {
+        "spdxId": "urn:alpine-latest-4b36aed8-e41b-49f6-a5a7-8dbbcc54323d",
+        "name": "alpine-container",
+        "packageVersion": null,
+        "type": "Package",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T17:16:39Z",
+          "createdBy": [
+            "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      },
+      {
+        "spdxId": "urn:openssl-3.0.4-cf812fb8-20e3-11ee-be56-0242ac120002",
+        "name": "openssl",
+        "packageVersion": null,
+        "type": "Package",
+        "creationInfo": {
+          "specVersion": "3.0.0",
+          "created": "2023-08-17T17:16:39Z",
+          "createdBy": [
+            "urn:alpinelinux.org-2386480c-2434-433e-a0dc-eb10c5742ad8"
+          ],
+          "profile": [
+            "core",
+            "software"
+          ],
+          "dataLicense": "CC0-1.0",
+          "createdUsing": []
+        }
+      }
+    ]
+  }
+}
