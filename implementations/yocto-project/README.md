@@ -41,3 +41,7 @@ In other words, how many nodes of Element can there be in a branch of the tree ?
 modelization ?
 
 5. What should the serialization of suppliedBy be: an array or a single string?
+
+6. In the profile Software, class : Package, attribute: homepage
+Issue: the attribute is sometimes referred to as "homepage" and sometimes as "homePage"
+
