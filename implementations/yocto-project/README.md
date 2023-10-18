@@ -45,3 +45,4 @@ modelization ?
 6. In the profile Software, class : Package, attribute: homepage
 Issue: the attribute is sometimes referred to as "homepage" and sometimes as "homePage"
 
+7. The attribute "from" conflicts with a build-in in Python
