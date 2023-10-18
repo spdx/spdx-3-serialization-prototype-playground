@@ -1,0 +1,61 @@
+{
+    "@context": [
+        "",
+        {
+
+        }
+    ],
+    "@graph": [
+        {
+            "@id": "CreationInfo1",
+            "type": "CreationInfo",
+            "specVersion": "3.0.0",
+            "profile": [
+                "core",
+                "software"
+            ],
+            "createdUsing": [
+                "Tool: OpenEmbedded Core create-spdx.bbclass"
+            ],
+            "dataLicense": "https://spdx.org/licenses/CC0-1.0",
+            "created": "2023-10-17T12:07:32Z",
+            "createdBy": [
+                "spdx-base-files:SPDXRef-Actor-OpenEmbedded()",
+                "spdx-base-files:SPDXRef-Actor-Person:N/A()"
+            ]
+        },
+        {
+            "type": "SpdxDocument",
+            "spdxId": "SPDXRef-DOCUMENT",
+            "name": "recipe-base-files",
+            "documentNamespace": "http://spdx.org/spdxdoc/recipe-base-files-c146050a-959a-5836-966f-98e79d6e765f",
+            "creationInfo": "_:CreationInfo1",
+            "tool": {
+                "type": "Tool",
+                "spdxId": "spdx-base-files:SPDXRef-Actor-OpenEmbeddedCorecreate-spdx.bbclass",
+                "name": "OpenEmbedded Core create-spdx.bbclass"
+            },
+            "organization": {
+                "type": "Organization",
+                "spdxId": "spdx-base-files:SPDXRef-Actor-OpenEmbedded()",
+                "name": "OpenEmbedded ()"
+            },
+            "person": {
+                "type": "Person",
+                "spdxId": "spdx-base-files:SPDXRef-Actor-Person:N/A()",
+                "name": "Person: N/A ()"
+            }
+        },
+        {
+            "type": "Package",
+            "spdxId": "SPDXRef-Recipe-base-files",
+            "name": "base-files",
+            "packageVersion": "3.0.14",
+            "suppliedBy": [
+                "Organization: OpenEmbedded ()"
+            ],
+            "summary": "Miscellaneous files for the base system",
+            "description": "The base-files package creates the basic system directory structure and provides a small set of key configuration files for the system."
+        }
+    ]
+}
