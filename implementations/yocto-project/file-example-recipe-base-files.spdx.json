@@ -1,0 +1,300 @@
+{
+    "@context": [
+        "",
+        {
+
+        }
+    ],
+    "@graph": [
+        {
+            "@id": "_:CreationInfo1",
+            "type": "CreationInfo",
+            "createdBy": [
+                "spdx-base-files:SPDXRef-Actor-OpenEmbedded()",
+                "spdx-base-files:SPDXRef-Actor-Person:N/A()"
+            ],
+            "createdUsing": [
+                "spdx-base-files:SPDXRef-Actor-OpenEmbeddedCorecreate-spdx.bbclass"
+            ],
+            "specVersion": "3.0.0",
+            "profile": [
+                "core",
+                "software"
+            ],
+            "dataLicense": "https://spdx.org/licenses/CC0-1.0",
+            "created": "2023-10-18T09:57:29Z"
+        },
+        {
+            "type": "SpdxDocument",
+            "spdxId": "SPDXRef-DOCUMENT",
+            "name": "recipe-base-files",
+            "documentNamespace": "http://spdx.org/spdxdoc/recipe-base-files-c146050a-959a-5836-966f-98e79d6e765f",
+            "creationInfo": "_:CreationInfo1",
+            "element": [
+                "SPDXRef-Recipe-base-files",
+                "spdx-base-files:SPDXRef-nsswitch.conf",
+                "spdx-base-files:SPDXRef-fstab",
+                "spdx-base-files:SPDXRef-hosts",
+                "spdx-base-files:SPDXRef-rotation",
+                "spdx-base-files:SPDXRef-issue",
+                "spdx-base-files:SPDXRef-motd",
+                "spdx-base-files:SPDXRef-profile",
+                "spdx-base-files:SPDXRef-host.conf",
+                "spdx-base-files:SPDXRef-shells",
+                "spdx-base-files:SPDXRef-issue.net",
+                "spdx-base-files:SPDXRef-licenses/GPL-2",
+                "spdx-base-files:SPDXRef-share/dot.bashrc",
+                "spdx-base-files:SPDXRef-share/dot.profile"
+            ]
+        },
+        {
+            "type": "Tool",
+            "spdxId": "spdx-base-files:SPDXRef-Actor-OpenEmbeddedCorecreate-spdx.bbclass",
+            "name": "OpenEmbedded Core create-spdx.bbclass",
+            "creationInfo": "_:CreationInfo1"
+        },
+        {
+            "type": "Organization",
+            "spdxId": "spdx-base-files:SPDXRef-Actor-OpenEmbedded()",
+            "name": "OpenEmbedded ()",
+            "creationInfo": "_:CreationInfo1"
+        },
+        {
+            "type": "Person",
+            "spdxId": "spdx-base-files:SPDXRef-Actor-Person:N/A()",
+            "name": "Person: N/A ()"
+        },
+        {
+            "type": "Package",
+            "spdxId": "SPDXRef-Recipe-base-files",
+            "name": "base-files",
+            "packageVersion": "3.0.14",
+            "suppliedBy": [
+                "Organization: OpenEmbedded ()"
+            ],
+            "summary": "Miscellaneous files for the base system",
+            "description": "The base-files package creates the basic system directory structure and provides a small set of key configuration files for the system."
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-nsswitch.conf",
+            "name": "nsswitch.conf",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "2fe930a01bb3ceb69e4f9e5320e147dde90815f4"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "2875235cd60dfdec24a78fd25073aba0d5127808ba54cd9128cd355df79192cc"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-fstab",
+            "name": "fstab",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "63752b35712bff8df755eae1d974d05fed9c73d3"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "f44729b17ba1f3391765830f580a1529324f632acf499ecf95e495a74584d49b"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-hosts",
+            "name": "hosts",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "b29fc4a155a568f0617d92853072cdcf6b05699a"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "1c642037ae601fd7ce14c9bbeb758836708bfd3e6758b9958fd406f527c85f77"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-rotation",
+            "name": "rotation",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "b6589fc6ab0dc82cf12099d1c2d40ab994e8410c"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-issue",
+            "name": "issue",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-motd",
+            "name": "motd",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-profile",
+            "name": "profile",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "d12fb1baa2fe10d4245def4c6de07deee67e79ec"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "3fe6c3913ec40419f3b396cfb95994b76b67263eb7e49b1355668e4c5ef31b63"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-host.conf",
+            "name": "host.conf",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "5d1bd37371d91358c2bd3d6fd79f4256b59d957f"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "83b331f98a128e1721c54be5c07bd38ad0d146e89cdecbe0eb53cbc23ff6b86a"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-shells",
+            "name": "shells",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "4f360cd116c9366f8090f987d06a0f415f0c71a8"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "184fd1ac95af5ad460ee875e9fddb4975e8720ee7d805d964c68d125573537be"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-issue.net",
+            "name": "issue.net",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-licenses/GPL-2",
+            "name": "licenses/GPL-2",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "dfac199a7539a404407098a2541b9482279f690d"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "32b1062f7da84967e7019d01ab805935caa7ab7321a7ced0e30ebe75e5df1670"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-share/dot.bashrc",
+            "name": "share/dot.bashrc",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "d0b0005261ee49c057277f466846d869c5c15eb0"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "a58074b4d1a36caebb6617d019643dd334f430332ad7ee63e1a55d9276b505ce"
+                }
+            ]
+        },
+        {
+            "type": "File",
+            "spdxId": "spdx-base-files:SPDXRef-share/dot.profile",
+            "name": "share/dot.profile",
+            "verifiedUsing": [
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA1",
+                    "hashValue": "2232f893f935b0f47a65bd162f763d5c969ea11a"
+                },
+                {
+                    "type": "Hash",
+                    "algorithm": "SHA256",
+                    "hashValue": "ae9f94718cf33010670937eb2b92dcacf1f8c0f5ec51eca6ae3f1347c0b224db"
+                }
+            ]
+        }
+    ]
+}
