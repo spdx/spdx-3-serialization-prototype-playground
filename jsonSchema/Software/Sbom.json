@@ -1,0 +1,100 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "Sbom",
+    "type": "object",
+    "required": [
+        "spdxId",
+        "creationInfo"
+    ],
+    "properties": {
+        "spdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "name": {
+            "type": "string"
+        },
+        "summary": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "creationInfo": {
+            "$ref": "/Core/CreationInfo.json"
+        },
+        "verifiedUsing": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/IntegrityMethod.json"
+            }
+        },
+        "externalRef": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/ExtrnalRef.json"
+            }
+        },
+        "externalIdentifier": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/ExternalIdentifier.json"
+            }
+        },
+        "extension": {
+            "type": "array",
+            "items": {
+                "$ref": "/Extension/Extension.json"
+            }
+        },
+        "element": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/Element.json"
+            }
+        },
+        "rootElement": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/Element.json"
+            }
+        },
+        "profileConformance": {
+            "type": "array",
+            "items": {
+                "enum": [
+                    "core",
+                    "software",
+                    "simpleLicensing",
+                    "expandedLicensing",
+                    "security",
+                    "build",
+                    "ai",
+                    "dataset",
+                    "usage",
+                    "extension"
+                ]
+            }
+        },
+        "context": {
+            "type": "string"
+        },
+        "sbomType": {
+            "type": "array",
+            "items": {
+                "enum": [
+                    "design",
+                    "source",
+                    "build",
+                    "deployed",
+                    "runtime",
+                    "analyzed"
+                ]
+            }
+        }
+    }
+}

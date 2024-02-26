@@ -1,0 +1,55 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "Tool",
+    "type": "object",
+    "required": [
+        "spdxId",
+        "creationInfo"
+    ],
+    "properties": {
+        "spdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "name": {
+            "type": "string"
+        },
+        "summary": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "creationInfo": {
+            "$ref": "CreationInfo.json"
+        },
+        "verifiedUsing": {
+            "type": "array",
+            "items": {
+                "$ref": "IntegrityMethod.json"
+            }
+        },
+        "externalRef": {
+            "type": "array",
+            "items": {
+                "$ref": "ExtrnalRef.json"
+            }
+        },
+        "externalIdentifier": {
+            "type": "array",
+            "items": {
+                "$ref": "ExternalIdentifier.json"
+            }
+        },
+        "extension": {
+            "type": "array",
+            "items": {
+                "$ref": "/Extension/Extension.json"
+            }
+        }
+    }
+}

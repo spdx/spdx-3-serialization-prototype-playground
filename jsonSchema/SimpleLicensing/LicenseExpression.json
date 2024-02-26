@@ -1,0 +1,69 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "LicenseExpression",
+    "type": "object",
+    "required": [
+        "spdxId",
+        "creationInfo",
+        "licenseExpression"
+    ],
+    "properties": {
+        "spdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "name": {
+            "type": "string"
+        },
+        "summary": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "creationInfo": {
+            "$ref": "/Core/CreationInfo.json"
+        },
+        "verifiedUsing": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/IntegrityMethod.json"
+            }
+        },
+        "externalRef": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/ExtrnalRef.json"
+            }
+        },
+        "externalIdentifier": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/ExternalIdentifier.json"
+            }
+        },
+        "extension": {
+            "type": "array",
+            "items": {
+                "$ref": "/Extension/Extension.json"
+            }
+        },
+        "licenseExpression": {
+            "type": "string"
+        },
+        "licenseListVersion": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*).(0|[1-9]\\d*).(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-])(?:.(?:0|[1-9]\\d|\\d*[a-zA-Z-][0-9a-zA-Z-]))))?(?:+([0-9a-zA-Z-]+(?:.[0-9a-zA-Z-]+)*))?$"
+        },
+        "customIdToUri": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/DictionaryEntry.json"
+            }
+        }
+    }
+}

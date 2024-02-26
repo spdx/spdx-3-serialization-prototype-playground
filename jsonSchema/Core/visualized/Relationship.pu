@@ -1,0 +1,14 @@
+@startjson
+
+#highlight "properties"/"spdxId"  
+#highlight "properties"/"spdxId"/"type"  
+#highlight "properties"/"spdxId"/"format"  
+#highlight "properties"/"creationInfo"
+#highlight "properties"/"creationInfo"/"$ref"
+#highlight "properties"/"from"
+#highlight "properties"/"from"/"$ref"
+#highlight "properties"/"relationshipType"
+#highlight "properties"/"relationshipType"/"enum"
+
+!include ../Relationship.json
+@endjson

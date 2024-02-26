@@ -1,0 +1,37 @@
+@startjson
+<style>
+.anyOf {
+    BackGroundColor orange
+}
+</style>
+
+#highlight "properties"/"spdxId" 
+#highlight "properties"/"creationInfo"
+#highlight "properties"/"element" 
+#highlight "properties"/"rootElement" 
+
+#highlight "definitions"/"Agent"/"properties"/"spdxId" 
+#highlight "definitions"/"Agent"/"properties"/"name"
+#highlight "definitions"/"AnyLicenseInfo"/"properties"/"spdxId"  
+#highlight "definitions"/"AnyLicenseInfo"/"properties"/"creationInfo"  
+#highlight "definitions"/"AnyLicenseInfo"/"properties"/"licenseExpression"  
+#highlight "definitions"/"CreationInfo"/"properties"/"created"
+#highlight "definitions"/"CreationInfo"/"properties"/"createdBy"
+#highlight "definitions"/"ExternalIdentifier"/"properties"/"externalIdentifierType"  
+#highlight "definitions"/"ExternalIdentifier"/"properties"/"identifier"  
+#highlight "definitions"/"Package"/"properties"/"spdxId"
+#highlight "definitions"/"Package"/"properties"/"name"
+#highlight "definitions"/"Package"/"properties"/"creationInfo"
+#highlight "definitions"/"Package"/"properties"/"suppliedBy"
+#highlight "definitions"/"Package"/"properties"/"copyrightText"  
+#highlight "definitions"/"Package"/"properties"/"packageVersion"  
+#highlight "definitions"/"Package"/"properties"/"downloadLocation" <<anyOf>>  
+#highlight "definitions"/"Package"/"properties"/"packageUrl" <<anyOf>>  
+#highlight "definitions"/"Relationship"/"properties"/"spdxId"  
+#highlight "definitions"/"Relationship"/"properties"/"creationInfo"  
+#highlight "definitions"/"Relationship"/"properties"/"from"  
+#highlight "definitions"/"Relationship"/"properties"/"to"  
+#highlight "definitions"/"Relationship"/"properties"/"relationshipType"  
+
+!include ../Lite.json
+@endjson

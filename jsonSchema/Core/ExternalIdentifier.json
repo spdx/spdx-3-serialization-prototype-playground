@@ -1,0 +1,40 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "ExternalIdentifier",
+    "type": "object",
+    "required": [
+        "externalIdentifierType",
+        "identifier"
+    ],
+    "properties": {
+        "externalIdentifierType": {
+            "enum": [
+                "cpe22",
+                "cpe23",
+                "cve",
+                "email",
+                "gitoid",
+                "other",
+                "packageUrl",
+                "securityOther",
+                "swhid",
+                "swid",
+                "urlScheme"
+            ]
+        },
+        "identifier": {
+            "type": "string"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "identifierLocator": {
+            "type": "string",
+            "format": "uri"
+        },
+        "issuingAuthority": {
+            "type": "string"
+        }
+    }
+}

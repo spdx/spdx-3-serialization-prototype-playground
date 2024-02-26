@@ -1,0 +1,10 @@
+@startjson
+
+#highlight "properties"/"prefix"  
+#highlight "properties"/"prefix"/"type"  
+#highlight "properties"/"namespace"  
+#highlight "properties"/"namespace"/"type"  
+#highlight "properties"/"namespace"/"format"  
+
+!include ../NamespaceMap.json
+@endjson

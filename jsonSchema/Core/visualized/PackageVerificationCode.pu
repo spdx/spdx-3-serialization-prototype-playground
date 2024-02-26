@@ -1,0 +1,7 @@
+@startjson
+
+#highlight "properties"/"hashValue"  
+#highlight "properties"/"hashValue"/"type"  
+
+!include ../PackageVerificationCode.json
+@endjson

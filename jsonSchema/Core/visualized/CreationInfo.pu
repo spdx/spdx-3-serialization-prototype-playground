@@ -1,0 +1,16 @@
+@startjson
+
+#highlight "properties"/"specVersion"  
+#highlight "properties"/"specVersion"/"type"  
+#highlight "properties"/"specVersion"/"pattern"  
+#highlight "properties"/"created"
+#highlight "properties"/"created"/"type"
+#highlight "properties"/"created"/"format"
+#highlight "properties"/"createdBy"
+#highlight "properties"/"createdBy"/"type"
+#highlight "properties"/"createdBy"/"minItems"
+#highlight "properties"/"createdBy"/"items"
+#highlight "properties"/"createdBy"/"items"/"$ref"
+
+!include ../CreationInfo.json
+@endjson

@@ -1,0 +1,23 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "PackageVerificationCode",
+    "type": "object",
+    "required": [
+        "hashValue"
+    ],
+    "properties": {
+        "comment": {
+            "type": "string"
+        },
+        "hashValue": {
+            "type": "string"
+        },
+        "packageVerificationCodeExcludedFile": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    }
+}

@@ -1,0 +1,8 @@
+@startjson
+
+#highlight "properties"/"externalSpdxId"  
+#highlight "properties"/"externalSpdxId"/"type"  
+#highlight "properties"/"externalSpdxId"/"format"  
+
+!include ../ExternalMap.json
+@endjson

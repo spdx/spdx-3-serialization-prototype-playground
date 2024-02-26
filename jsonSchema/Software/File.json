@@ -1,0 +1,186 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "File",
+    "type": "object",
+    "required": [
+        "spdxId",
+        "creationInfo"
+    ],
+    "properties": {
+        "spdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "name": {
+            "type": "string"
+        },
+        "summary": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "creationInfo": {
+            "$ref": "/Core/CreationInfo.json"
+        },
+        "verifiedUsing": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/IntegrityMethod.json"
+            }
+        },
+        "externalRef": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/ExtrnalRef.json"
+            }
+        },
+        "externalIdentifier": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/ExternalIdentifier.json"
+            }
+        },
+        "extension": {
+            "type": "array",
+            "items": {
+                "$ref": "/Extension/Extension.json"
+            }
+        },
+        "originatedBy": {
+            "type": "array",
+            "items": {
+                "$ref": "/Core/Agent.json"
+            }
+        },
+        "suppliedBy": {
+            "$ref": "/Core/Agent.json"
+        },
+        "builtTime": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "releaseTime": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "validUntilTime": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "standardName": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "supportLevel": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "development",
+                    "support",
+                    "limitedSupport",
+                    "endOfSupport",
+                    "noSupport",
+                    "noAssertion"
+                ]
+            }
+        },
+        "gitoid": {
+            "type": "array",
+            "maxItems": 2,
+            "format": "uri"
+        },
+        "primaryPurpose": {
+            "enum": [
+                "application",
+                "archive",
+                "bom",
+                "configuration",
+                "container",
+                "data",
+                "device",
+                "diskImage",
+                "deviceDriver",
+                "documentation",
+                "evidence",
+                "executable",
+                "file",
+                "filesystemImage",
+                "firmware",
+                "framework",
+                "install",
+                "library",
+                "manifest",
+                "model",
+                "module",
+                "operatingSystem",
+                "other",
+                "patch",
+                "platform",
+                "requirement",
+                "source",
+                "specification",
+                "test"
+            ]
+        },
+        "additionalPurpose": {
+            "type": "array",
+            "items": {
+                "enum": [
+                    "application",
+                    "archive",
+                    "bom",
+                    "configuration",
+                    "container",
+                    "data",
+                    "device",
+                    "diskImage",
+                    "deviceDriver",
+                    "documentation",
+                    "evidence",
+                    "executable",
+                    "file",
+                    "filesystemImage",
+                    "firmware",
+                    "framework",
+                    "install",
+                    "library",
+                    "manifest",
+                    "model",
+                    "module",
+                    "operatingSystem",
+                    "other",
+                    "patch",
+                    "platform",
+                    "requirement",
+                    "source",
+                    "specification",
+                    "test"
+                ]
+            }
+        },
+        "copyrightText": {
+            "type": "string"
+        },
+        "attributionText": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "contentType": {
+            "type": "string",
+            "pattern": "^[^\/]+/[^\/]+$"
+        },
+        "isDirectory": {
+            "type": "boolean"
+        }
+    }
+}

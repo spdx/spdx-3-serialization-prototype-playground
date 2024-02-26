@@ -1,0 +1,144 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "Relationship",
+    "type": "object",
+    "required": [
+        "spdxId",
+        "creationInfo",
+        "from",
+        "relationshipType"
+    ],
+    "properties": {
+        "spdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "name": {
+            "type": "string"
+        },
+        "summary": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "creationInfo": {
+            "$ref": "CreationInfo.json"
+        },
+        "verifiedUsing": {
+            "type": "array",
+            "items": {
+                "$ref": "IntegrityMethod.json"
+            }
+        },
+        "externalRef": {
+            "type": "array",
+            "items": {
+                "$ref": "ExtrnalRef.json"
+            }
+        },
+        "externalIdentifier": {
+            "type": "array",
+            "items": {
+                "$ref": "ExternalIdentifier.json"
+            }
+        },
+        "extension": {
+            "type": "array",
+            "items": {
+                "$ref": "/Extension/Extension.json"
+            }
+        },
+        "from": {
+            "$ref": "Element.json"
+        },
+        "to": {
+            "type": "array",
+            "minItems": 0,
+            "items": {
+                "$ref": "Element.json"
+            }
+        },
+        "relationshipType": {
+            "enum": [
+                "affects",
+                "amendedBy",
+                "ancestorOf",
+                "availableFrom",
+                "configures",
+                "contains",
+                "coordinatedBy",
+                "copiedTo",
+                "delegatedTo",
+                "dependsOn",
+                "descendantOf",
+                "describes",
+                "doesNotAffect",
+                "expandsTo",
+                "exploitCreatedBy",
+                "fixedBy",
+                "fixedIn",
+                "foundBy",
+                "generates",
+                "hasAddedFile",
+                "hasAssessmentFor",
+                "hasAssociatedVulnerability",
+                "hasConcludedLicense",
+                "hasDataFile",
+                "hasDeletedFile",
+                "hasDependencyManifest",
+                "hasDistributionArtifact",
+                "hasDocumentation",
+                "hasDynamicLink",
+                "hasEvicence",
+                "hasExample",
+                "hasHost",
+                "hasInputs",
+                "hasMetadata",
+                "hasOptionalComponent",
+                "hasOptionalDependency",
+                "hasOutputs",
+                "hasPrerequsite",
+                "hasProvidedDependency",
+                "hasRequirement",
+                "hasSpecification",
+                "hasStaticLink",
+                "hasTest",
+                "hasTestCase",
+                "hasVariant",
+                "invokedBy",
+                "modifiedBy",
+                "other",
+                "packagedBy",
+                "patchedBy",
+                "publishedBy",
+                "reportedBy",
+                "republishedBy",
+                "serializedInArtifact",
+                "testedOn",
+                "trainedOn",
+                "underInvestigationFor",
+                "usesTool"
+            ]
+        },
+        "completeness": {
+            "enum": [
+                "incomplete",
+                "complete",
+                "noAssertion"
+            ]
+        },
+        "startTime": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "endTime": {
+            "type": "string",
+            "format": "date-time"
+        }
+    }
+}

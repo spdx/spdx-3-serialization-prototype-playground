@@ -1,0 +1,336 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "Lite",
+    "type": "object",
+    "required": [
+        "spdxId",
+        "creationInfo",
+        "rootElement",
+        "element"
+    ],
+    "properties": {
+        "spdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "comment": {
+            "type": "string"
+        },
+        "creationInfo": {
+            "$ref": "#/definitions/CreationInfo"
+        },
+        "element": {
+            "type": "array",
+            "items": {
+                "anyOf": [
+                    {
+                        "$ref": "#/definitions/Package"
+                    },
+                    {
+                        "$ref": "#/definitions/Relationship"
+                    },
+                    {
+                        "$ref": "#/definitions/AnyLicenseInfo"
+                    }
+                ]
+            }
+        },
+        "rootElement": {
+            "type": "array",
+            "items": {
+                "anyOf": [
+                    {
+                        "$ref": "#/definitions/Package"
+                    },
+                    {
+                        "$ref": "#/definitions/Relationship"
+                    },
+                    {
+                        "$ref": "#/definitions/AnyLicenseInfo"
+                    }
+                ]
+            }
+        }
+    },
+    "definitions": {
+        "Agent": {
+            "type": "object",
+            "reruired": [
+                "spdxId",
+                "name"
+            ],
+            "properties": {
+                "spdxId": {
+                    "$ref": "#/definitions/SpdxId"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "externalIdentifier": {
+                    "$ref": "#/definitions/ExternalIdentifier"
+                }
+            }
+        },
+        "AnyLicenseInfo": {
+            "type": "object",
+            "required": [
+                "spdxId",
+                "creationInfo",
+                "licenseExpression"
+            ],
+            "properties": {
+                "spdxId": {
+                    "$ref": "#/definitions/SpdxId"
+                },
+                "creationInfo": {
+                    "$ref": "#/definitions/CreationInfo"
+                },
+                "licenseExpression": {
+                    "type": "string"
+                },
+                "licenseListVersion": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d*).(0|[1-9]\\d*).(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-])(?:.(?:0|[1-9]\\d|\\d*[a-zA-Z-][0-9a-zA-Z-]))))?(?:+([0-9a-zA-Z-]+(?:.[0-9a-zA-Z-]+)*))?$"
+                },
+                "licenseText": {
+                    "type": "string"
+                }
+            }
+        },
+        "CreationInfo": {
+            "type": "object",
+            "required": [
+                "created",
+                "createdBy"
+            ],
+            "properties": {
+                "specVersion": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d*).(0|[1-9]\\d*).(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-])(?:.(?:0|[1-9]\\d|\\d*[a-zA-Z-][0-9a-zA-Z-]))))?(?:+([0-9a-zA-Z-]+(?:.[0-9a-zA-Z-]+)*))?$"
+                },
+                "comment": {
+                    "type": "string"
+                },
+                "created": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "createdBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/Agent"
+                    }
+                }
+            }
+        },
+        "ExternalIdentifier": {
+            "type": "object",
+            "required": [
+                "externalIdentifierType",
+                "identifier"
+            ],
+            "properties": {
+                "externalIdentifierType": {
+                    "enum": [
+                        "cpe22",
+                        "cpe23",
+                        "cve",
+                        "email",
+                        "gitoid",
+                        "other",
+                        "packageUrl",
+                        "securityOther",
+                        "swhid",
+                        "swid",
+                        "urlScheme"
+                    ]
+                },
+                "identifier": {
+                    "type": "string"
+                }
+            }
+        },
+        "Package": {
+            "type": "object",
+            "required": [
+                "spdxId",
+                "name",
+                "creationInfo",
+                "suppliedBy",
+                "copyrightText",
+                "packageVersion"
+            ],
+            "anyOf": [
+                {
+                    "required": [
+                        "downloadLocation"
+                    ]
+                },
+                {
+                    "required": [
+                        "packageUrl"
+                    ]
+                }
+            ],
+            "properties": {
+                "spdxId": {
+                    "$ref": "#/definitions/SpdxId"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "creationInfo": {
+                    "$ref": "#/definitions/CreationInfo"
+                },
+                "suppliedBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/Agent"
+                    }
+                },
+                "builtTime": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "releaseTime": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "validUntilTime": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "supportLevel": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "development",
+                            "support",
+                            "limitedSupport",
+                            "endOfSupport",
+                            "noSupport",
+                            "noAssertion"
+                        ]
+                    }
+                },
+                "copyrightText": {
+                    "type": "string"
+                },
+                "packageVersion": {
+                    "type": "string"
+                },
+                "downloadLocation": {
+                    "type": "string",
+                    "format": "uri"
+                },
+                "packageUrl": {
+                    "type": "string",
+                    "format": "uri"
+                },
+                "homePage": {
+                    "type": "string",
+                    "format": "uri",
+                    "pattern": "https?:\/\/[\\w!?/+\\-_~;.,*&@#$%()'[\\]]+"
+                }
+            }
+        },
+        "Relationship": {
+            "type": "object",
+            "required": [
+                "spdxId",
+                "creationInfo",
+                "from",
+                "to",
+                "relationshipType"
+            ],
+            "properties": {
+                "spdxId": {
+                    "$ref": "#/definitions/SpdxId"
+                },
+                "creationInfo": {
+                    "$ref": "#/definitions/CreationInfo"
+                },
+                "from": {
+                    "$ref": "#/definitions/SpdxId"
+                },
+                "to": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/SpdxId"
+                    }
+                },
+                "relationshipType": {
+                    "enum": [
+                        "affects",
+                        "amendedBy",
+                        "ancestorOf",
+                        "availableFrom",
+                        "configures",
+                        "contains",
+                        "coordinatedBy",
+                        "copiedTo",
+                        "delegatedTo",
+                        "dependsOn",
+                        "descendantOf",
+                        "describes",
+                        "doesNotAffect",
+                        "expandsTo",
+                        "exploitCreatedBy",
+                        "fixedBy",
+                        "fixedIn",
+                        "foundBy",
+                        "generates",
+                        "hasAddedFile",
+                        "hasAssessmentFor",
+                        "hasAssociatedVulnerability",
+                        "hasConcludedLicense",
+                        "hasDataFile",
+                        "hasDeletedFile",
+                        "hasDependencyManifest",
+                        "hasDistributionArtifact",
+                        "hasDocumentation",
+                        "hasDynamicLink",
+                        "hasEvicence",
+                        "hasExample",
+                        "hasHost",
+                        "hasInputs",
+                        "hasMetadata",
+                        "hasOptionalComponent",
+                        "hasOptionalDependency",
+                        "hasOutputs",
+                        "hasPrerequsite",
+                        "hasProvidedDependency",
+                        "hasRequirement",
+                        "hasSpecification",
+                        "hasStaticLink",
+                        "hasTest",
+                        "hasTestCase",
+                        "hasVariant",
+                        "invokedBy",
+                        "modifiedBy",
+                        "other",
+                        "packagedBy",
+                        "patchedBy",
+                        "publishedBy",
+                        "reportedBy",
+                        "republishedBy",
+                        "serializedInArtifact",
+                        "testedOn",
+                        "trainedOn",
+                        "underInvestigationFor",
+                        "usesTool"
+                    ]
+                }
+            }
+        },
+        "SpdxId": {
+            "type": "string",
+            "format": "uri"
+        }
+    }
+}
