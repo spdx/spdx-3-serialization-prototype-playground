@@ -89,6 +89,7 @@
                 "hasAssociatedVulnerability",
                 "hasConcludedLicense",
                 "hasDataFile",
+                "hasDeclaredLicense",
                 "hasDeletedFile",
                 "hasDependencyManifest",
                 "hasDistributionArtifact",
