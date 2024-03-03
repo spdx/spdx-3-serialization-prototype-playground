@@ -1,0 +1,7 @@
+@startjson
+
+#highlight "properties"/"key"  
+#highlight "properties"/"key"/"type"  
+
+!include ../DictionaryEntry.json
+@endjson

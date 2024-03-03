@@ -1,0 +1,70 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "ExternalRef",
+    "type": "object",
+    "properties": {
+        "externalRefType": {
+            "enum": [
+                "altDownloadLocation",
+                "altWebPage",
+                "binaryArtifact",
+                "bower",
+                "buildMeta",
+                "buildSystem",
+                "chat",
+                "certificationReport",
+                "componentAnalysisReport",
+                "documentation",
+                "dynamicAnalysisReport",
+                "eolNotice",
+                "exportControlAssessment",
+                "funding",
+                "issueTracker",
+                "mailingList",
+                "mavenCentral",
+                "metrics",
+                "npm",
+                "nuget",
+                "license",
+                "other",
+                "privacyAssessment",
+                "productMetadata",
+                "purchaseOrder",
+                "qualityAssessmentReport",
+                "releaseNotes",
+                "releaseHistory",
+                "riskAssessment",
+                "runtimeAnalysisReport",
+                "secureSoftwareAttestation",
+                "securityAdvisory",
+                "securityAdversaryModel",
+                "securityFix",
+                "securityOther",
+                "securityPenTestReport",
+                "securityPolicy",
+                "securityThreatModel",
+                "socialMedia",
+                "sourceArtifact",
+                "staticAnalysisReport",
+                "support",
+                "vcs",
+                "vulnerabilityDisclosureReport",
+                "vulnerabilityExploitabilityAssessment"
+            ]
+        },
+        "locator": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "contentType": {
+            "type": "string",
+            "pattern": "^[^\/]+/[^\/]+$"
+        },
+        "comment": {
+            "type": "string"
+        }
+    }
+}

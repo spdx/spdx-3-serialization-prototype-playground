@@ -1,0 +1,12 @@
+@startjson
+
+#highlight "properties"/"spdxId"  
+#highlight "properties"/"spdxId"/"type"  
+#highlight "properties"/"spdxId"/"format"  
+#highlight "properties"/"creationInfo"
+#highlight "properties"/"creationInfo"/"$ref"
+#highlight "properties"/"licenseExpression"
+#highlight "properties"/"licenseExpression"/"type"
+
+!include ../LicenseExpression.json
+@endjson

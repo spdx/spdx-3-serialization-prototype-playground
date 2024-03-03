@@ -1,0 +1,43 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "Hash",
+    "type": "object",
+    "required": [
+        "algorithm",
+        "hashValue"
+    ],
+    "properties": {
+        "comment": {
+            "type": "string"
+        },
+        "algorithm": {
+            "enum": [
+                "blake2b256",
+                "blake2b384",
+                "blake2b512",
+                "blake3",
+                "crystalsKyber",
+                "crystalsDilithium",
+                "falcon",
+                "md2",
+                "md4",
+                "md5",
+                "md6",
+                "other",
+                "sha1",
+                "sha224",
+                "sha256",
+                "sha3_224",
+                "sha3_256",
+                "sha3_384",
+                "sha3_512",
+                "sha384",
+                "sha512"
+            ]
+        },
+        "hashValue": {
+            "type": "string"
+        }
+    }
+}

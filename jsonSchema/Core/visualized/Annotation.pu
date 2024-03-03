@@ -1,0 +1,17 @@
+@startjson
+
+#highlight "properties"/"spdxId"  
+#highlight "properties"/"spdxId"/"type"  
+#highlight "properties"/"spdxId"/"format"  
+#highlight "properties"/"creationInfo"
+#highlight "properties"/"creationInfo"/"$ref"
+#highlight "properties"/"annotationType"
+#highlight "properties"/"annotationType"/"type"
+#highlight "properties"/"annotationType"/"items"
+#highlight "properties"/"annotationType"/"items"/"type"
+#highlight "properties"/"annotationType"/"items"/"enum"
+#highlight "properties"/"subject"
+#highlight "properties"/"subject"/"$ref"
+
+!include ../Annotation.json
+@endjson

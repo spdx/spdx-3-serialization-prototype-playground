@@ -1,0 +1,28 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "ExternalMap",
+    "type": "object",
+    "required": [
+        "externalSpdxId"
+    ],
+    "properties": {
+        "externalSpdxId": {
+            "type": "string",
+            "format": "uri"
+        },
+        "verifiedUsing": {
+            "type": "array",
+            "items": {
+                "$ref": "IntegrityMethod.json"
+            }
+        },
+        "locationHint": {
+            "type": "string",
+            "format": "uri"
+        },
+        "definingArtifact": {
+            "$ref": "Artifact.json"
+        }
+    }
+}

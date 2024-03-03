@@ -1,0 +1,9 @@
+@startjson
+
+#highlight "properties"/"externalIdentifierType"  
+#highlight "properties"/"externalIdentifierType"/"enum"  
+#highlight "properties"/"identifier"
+#highlight "properties"/"identifier"/"type"
+
+!include ../ExternalIdentifier.json
+@endjson

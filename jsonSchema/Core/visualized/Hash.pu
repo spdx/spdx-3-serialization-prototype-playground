@@ -1,0 +1,9 @@
+@startjson
+
+#highlight "properties"/"algorithm"  
+#highlight "properties"/"algorithm"/"enum"  
+#highlight "properties"/"hashValue"  
+#highlight "properties"/"hashValue"/"type"  
+
+!include ../Hash.json
+@endjson

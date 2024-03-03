@@ -1,0 +1,20 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://spdx.org/rdf/terms/3.0",
+    "title": "PositiveIntegerRange",
+    "type": "object",
+    "required": [
+        "beginIntegerRange",
+        "endIntegerRange"
+    ],
+    "properties": {
+        "beginIntegerRange": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "endIntegerRange": {
+            "type": "integer",
+            "minimum": 1
+        }
+    }
+}

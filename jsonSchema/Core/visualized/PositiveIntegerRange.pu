@@ -1,0 +1,11 @@
+@startjson
+
+#highlight "properties"/"beginIntegerRange"  
+#highlight "properties"/"beginIntegerRange"/"type"  
+#highlight "properties"/"beginIntegerRange"/"minimum"  
+#highlight "properties"/"endIntegerRange"  
+#highlight "properties"/"endIntegerRange"/"type"  
+#highlight "properties"/"endIntegerRange"/"minimum"  
+
+!include ../PositiveIntegerRange.json
+@endjson
