@@ -10,7 +10,11 @@ import functools
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone, timedelta
+from enum import Enum
+from abc import ABC, abstractmethod
 
 
 def check_type(obj, types):
@@ -22,27 +26,26 @@ def check_type(obj, types):
         raise TypeError(f"Value must be of type {types.__name__}. Got {type(obj)}")
 
 
-class Property(object):
+class Property(ABC):
     """
     A generic SHACL object property. The different types will derive from this
     class
     """
 
-    TYPE = None
-
-    def __init__(self):
-        pass
+    def __init__(self, *, pattern=None):
+        self.pattern = pattern
 
     def init(self):
         return None
 
     def validate(self, value):
         check_type(value, self.VALID_TYPES)
+        if self.pattern is not None and not re.search(
+            self.pattern, self.to_string(value)
+        ):
+            raise ValueError(f"Value is not correctly formatted. Got '{value}'")
 
     def set(self, value):
-        return value
-
-    def get(self, value):
         return value
 
     def check_min_count(self, value, min_count):
@@ -57,24 +60,20 @@ class Property(object):
     def walk(self, value, callback, path):
         callback(value, path)
 
-    def serializer(self, value, context):
-        return value
-
-    def deserialize(self, data, context, *, object_ids=None):
-        if isinstance(data, dict) and "@value" in data:
-            if self.TYPE:
-                for t in ("@type", context.compact("@type")):
-                    if t in data and data[t] != self.TYPE:
-                        raise TypeError(
-                            f"Value must be of type {self.TYPE}, but got {data[t]}"
-                        )
-
-            return data["@value"]
-
-        return data
-
     def link_prop(self, value, link_cache, missing, visited):
         return value
+
+    @classmethod
+    def to_string(cls, value):
+        return str(value)
+
+    @abstractmethod
+    def encode(self, encoder, value, state):
+        pass
+
+    @abstractmethod
+    def decode(self, decoder, *, object_ids=None):
+        pass
 
 
 class StringProp(Property):
@@ -82,38 +81,24 @@ class StringProp(Property):
     A scalar string property for an SHACL object
     """
 
-    TYPE = None
     VALID_TYPES = str
-    REGEX = None
 
     def set(self, value):
         return str(value)
 
-    def validate(self, value):
-        super().validate(value)
-        if self.REGEX is not None and not re.match(self.REGEX, value):
-            raise ValueError(f"Value is not correctly formatted. Got '{value}'")
+    def encode(self, encoder, value, state):
+        encoder.write_string(value)
+
+    def decode(self, decoder, *, object_ids=None):
+        return decoder.read_string()
 
 
 class AnyURIProp(StringProp):
-    TYPE = "http://www.w3.org/2001/XMLSchema#anyURI"
+    def encode(self, encoder, value, state):
+        encoder.write_iri(value)
 
-    def validate(self, value):
-        super().validate(value)
-
-
-class MediaTypeProp(StringProp):
-    TYPE = "https://spdx.org/rdf/v3/Core/MediaType"
-    REGEX = r"^([a-zA-Z0-9][-a-zA-Z0-9!#$&^_.+]{0,126})\/([a-zA-Z0-9][-a-zA-Z0-9!#$&^_.+]{0,126})(;.+)?$"
-
-
-class SemVerProp(StringProp):
-    TYPE = "https://spdx.org/rdf/v3/Core/SemVer"
-    REGEX = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-
-
-class ExtensionProp(StringProp):
-    TYPE = "https://spdx.org/rdf/v3/Core/Extension"
+    def decode(self, decoder, *, object_ids=None):
+        return decoder.read_iri()
 
 
 class DateTimeProp(Property):
@@ -121,14 +106,50 @@ class DateTimeProp(Property):
     A Date/Time Object
     """
 
-    TYPE = "https://spdx.org/rdf/v3/Core/DateTime"
     VALID_TYPES = datetime
+    UTC_FORMAT_STR = "%Y-%m-%dT%H:%M:%SZ"
+    REGEX = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$"
 
     def set(self, value):
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return self._normalize(value)
 
-    def get(self, value):
-        return datetime.fromisoformat(value)
+    def encode(self, encoder, value, state):
+        encoder.write_datetime(value)
+
+    def decode(self, decoder, *, object_ids=None):
+        return self._normalize(decoder.read_datetime())
+
+    @classmethod
+    def _normalize(cls, value):
+        if value.utcoffset() is None:
+            value = value.astimezone()
+        offset = value.utcoffset()
+        if offset % timedelta(minutes=1):
+            offset = offset - (offset % timedelta(minutes=1))
+            value = value.replace(tzinfo=timezone(offset))
+        value = value.replace(microsecond=0)
+        return value
+
+    @classmethod
+    def to_string(cls, value):
+        value = cls._normalize(value)
+        if value.tzinfo == timezone.utc:
+            return value.strftime(cls.UTC_FORMAT_STR)
+        return value.isoformat()
+
+    @classmethod
+    def from_string(cls, value):
+        if not re.match(cls.REGEX, value):
+            raise ValueError(f"'{value}' is not a correctly formatted datetime")
+        if "Z" in value:
+            d = datetime(
+                *(time.strptime(value, cls.UTC_FORMAT_STR)[0:6]),
+                tzinfo=timezone.utc,
+            )
+        else:
+            d = datetime.fromisoformat(value)
+
+        return cls._normalize(d)
 
 
 class IntegerProp(Property):
@@ -137,10 +158,16 @@ class IntegerProp(Property):
     def set(self, value):
         return int(value)
 
+    def encode(self, encoder, value, state):
+        encoder.write_integer(value)
+
+    def decode(self, decoder, *, object_ids=None):
+        return decoder.read_integer()
+
 
 class PositiveIntegerProp(IntegerProp):
     def validate(self, value):
-        super.validate()
+        super().validate(value)
         if value < 1:
             raise ValueError(f"Value must be >=1. Got {value}")
 
@@ -158,12 +185,24 @@ class BooleanProp(Property):
     def set(self, value):
         return bool(value)
 
+    def encode(self, encoder, value, state):
+        encoder.write_bool(value)
+
+    def decode(self, decoder, *, object_ids=None):
+        return decoder.read_bool()
+
 
 class FloatProp(Property):
-    VALID_TYPES = float
+    VALID_TYPES = (float, int)
 
     def set(self, value):
         return float(value)
+
+    def encode(self, encoder, value, state):
+        encoder.write_float(value)
+
+    def decode(self, decoder, *, object_ids=None):
+        return decoder.read_float()
 
 
 class ObjectProp(Property):
@@ -193,33 +232,24 @@ class ObjectProp(Property):
         else:
             callback(value, path)
 
-    def serializer(self, value, context):
+    def encode(self, encoder, value, state):
         if value is None:
-            return None
+            raise ValueError("Object cannot be None")
 
         if isinstance(value, str):
-            return value
+            encoder.write_iri(value)
+            return
 
-        return value.serializer(context)
+        return value.encode(encoder, state, is_reference=True)
 
-    def deserialize(self, data, context, *, object_ids=None):
-        if data is None:
-            return data
+    def decode(self, decoder, *, object_ids=None):
+        iri = decoder.read_iri()
+        if iri is not None:
+            if object_ids and iri in object_ids:
+                return object_ids[iri]
+            return iri
 
-        if isinstance(data, str):
-            if data in object_ids:
-                return object_ids[data]
-
-            return data
-
-        if isinstance(data, dict) and not any(
-            t in data for t in ("@type", context.compact("@type"))
-        ):
-            for n in ("@id", context.compact("@id")):
-                if n in data:
-                    return data[n]
-
-        return SHACLObject.deserialize(data, context, object_ids=object_ids)
+        return SHACLObject.decode(decoder, object_ids=object_ids)
 
     def link_prop(self, value, link_cache, missing, visited):
         if value is None:
@@ -252,11 +282,11 @@ class ListProxy(object):
 
     def append(self, value):
         self.__prop.validate(value)
-        self.__data.append(value)
+        self.__data.append(self.__prop.set(value))
 
     def insert(self, idx, value):
         self.__prop.validate(value)
-        self.__data.insert(idx, value)
+        self.__data.insert(idx, self.__prop.set(value))
 
     def extend(self, items):
         for i in items:
@@ -272,10 +302,10 @@ class ListProxy(object):
         if isinstance(key, slice):
             for v in value:
                 self.__prop.validate(v)
+            self.__data[key] = [self.__prop.set(v) for v in value]
         else:
             self.__prop.validate(value)
-
-        self.__data[key] = value
+            self.__data[key] = self.__prop.set(value)
 
     def __delitem__(self, key):
         del self.__data[key]
@@ -326,7 +356,7 @@ class ListProp(Property):
         if isinstance(value, ListProxy):
             return value
 
-        return ListProxy(self.prop, value)
+        return ListProxy(self.prop, [self.prop.set(d) for d in value])
 
     def check_min_count(self, value, min_count):
         check_type(value, ListProxy)
@@ -345,25 +375,30 @@ class ListProp(Property):
         for idx, v in enumerate(value):
             self.prop.walk(v, callback, path + [f"[{idx}]"])
 
-    def deserialize(self, data, *args, **kwargs):
-        if isinstance(data, (list, tuple, set)):
-            data = [self.prop.deserialize(d, *args, **kwargs) for d in data]
+    def link_prop(self, value, link_cache, missing, visited):
+        if isinstance(value, ListProxy):
+            data = [self.prop.link_prop(v, link_cache, missing, visited) for v in value]
         else:
-            data = [self.prop.deserialize(data, *args, **kwargs)]
+            data = [self.prop.link_prop(v, link_cache, missing, visited) for v in value]
 
         return ListProxy(self.prop, data=data)
 
-    def link_prop(self, value, link_cache, missing, visited):
-        return ListProxy(
-            self.prop,
-            data=[self.prop.link_prop(v, link_cache, missing, visited) for v in value],
-        )
-
-    def serializer(self, value, context):
+    def encode(self, encoder, value, state):
         check_type(value, ListProxy)
-        if len(value) == 1:
-            return self.prop.serializer(value[0], context)
-        return [self.prop.serializer(v, context) for v in value]
+
+        with encoder.write_list() as list_s:
+            for v in value:
+                with list_s.write_list_item() as item_s:
+                    self.prop.encode(item_s, v, state)
+
+    def decode(self, decoder, *, object_ids=None):
+        data = []
+        for val_d in decoder.read_list():
+            v = self.prop.decode(val_d, object_ids=object_ids)
+            self.prop.validate(v)
+            data.append(v)
+
+        return ListProxy(self.prop, data=data)
 
 
 class EnumProp(Property):
@@ -377,43 +412,34 @@ class EnumProp(Property):
                 f"'{value}' is not a valid value for '{self.__class__.__name__}'"
             )
 
-    def deserialize(self, data, context, **kwargs):
-        value = super().deserialize(data, context, **kwargs)
-        return context.expand(value)
+    def encode(self, encoder, value, state):
+        encoder.write_enum(value, self)
 
-    def serializer(self, value, context):
-        return context.compact(value)
+    def decode(self, decoder, *, object_ids=None):
+        return decoder.read_enum(self)
+
+
+class Refable(Enum):
+    no = 1
+    local = 2
+    optional = 3
+    yes = 4
+    always = 5
 
 
 @functools.total_ordering
 class SHACLObject(object):
     DESERIALIZERS = {}
-
-    class IRIMap(object):
-        def __init__(self, obj):
-            self.obj = obj
-
-        def __getattr__(self, name):
-            try:
-                return self[name]
-            except KeyError as e:
-                raise AttributeError(str(e))
-
-        def __getitem__(self, name):
-            (json_name, _, _, _) = self.obj._obj_properties[name]
-            return json_name
-
-        def __contains__(self, name):
-            return name in self.obj._obj_properties
+    REFABLE = Refable.optional
+    ID_ALIAS = None
 
     def __init__(self):
         self._obj_data = {}
         self._obj_properties = {}
-        self._obj_written = False
+        self._obj_iris = {}
         self._obj_metadata = {}
 
-        self._add_property("_id", StringProp(), json_name="@id")
-        self._obj_IRI = self.IRIMap(self)
+        self._add_property("_id", StringProp(), iri="@id")
 
     def _set_init_props(self, **kwargs):
         for k, v in kwargs.items():
@@ -423,31 +449,40 @@ class SHACLObject(object):
         self,
         pyname,
         prop,
-        json_name=None,
+        iri,
         min_count=None,
         max_count=None,
     ):
-        if json_name is None:
-            json_name = pyname
-        if pyname in self._obj_properties:
+        if pyname in self._obj_iris:
             raise KeyError(
                 f"'{pyname}' is already defined for '{self.__class__.__name__}'"
             )
-        self._obj_properties[pyname] = (json_name, prop, min_count, max_count)
-        self._obj_data[json_name] = prop.init()
+        if iri in self._obj_properties:
+            raise KeyError(
+                f"'{iri}' is already defined for '{self.__class__.__name__}'"
+            )
+
+        while hasattr(self, pyname):
+            pyname = pyname + "_"
+
+        self._obj_iris[pyname] = iri
+        self._obj_properties[iri] = (prop, min_count, max_count, pyname)
+        self._obj_data[iri] = prop.init()
 
     def __setattr__(self, name, value):
         if name.startswith("_obj_"):
             return super().__setattr__(name, value)
 
+        if name == self.ID_ALIAS:
+            name = "_id"
+
         try:
-            (json_name, prop, _, _) = self._obj_properties[name]
+            iri = self._obj_iris[name]
+            self[iri] = value
         except KeyError:
             raise AttributeError(
                 f"'{name}' is not a valid property of {self.__class__.__name__}"
             )
-        prop.validate(value)
-        self._obj_data[json_name] = prop.set(value)
 
     def __getattr__(self, name):
         if name.startswith("_obj_"):
@@ -457,24 +492,74 @@ class SHACLObject(object):
             return self._obj_metadata
 
         if name == "_IRI":
-            return self._obj_IRI
+            return self._obj_iris
+
+        if name == self.ID_ALIAS:
+            name = "_id"
 
         try:
-            (json_name, prop, _, _) = self._obj_properties[name]
+            iri = self._obj_iris[name]
+            return self[iri]
         except KeyError:
             raise AttributeError(
                 f"'{name}' is not a valid property of {self.__class__.__name__}"
             )
-        return prop.get(self._obj_data[json_name])
 
     def __delattr__(self, name):
+        if name == self.ID_ALIAS:
+            name = "_id"
+
         try:
-            (json_name, prop, _, _) = self._obj_properties[name]
+            iri = self._obj_iris[name]
+            del self[iri]
         except KeyError:
             raise AttributeError(
                 f"'{name}' is not a valid property of {self.__class__.__name__}"
             )
-        self._obj_data[json_name] = prop.init()
+
+    def __get_prop(self, iri):
+        if iri not in self._obj_properties:
+            raise KeyError(
+                f"'{iri}' is not a valid property of {self.__class__.__name__}"
+            )
+
+        return self._obj_properties[iri]
+
+    def __iter_props(self):
+        for iri, v in self._obj_properties.items():
+            prop, min_count, max_count, pyname = v
+            yield iri, prop, min_count, max_count, pyname
+
+    def __getitem__(self, iri):
+        return self._obj_data[iri]
+
+    def __setitem__(self, iri, value):
+        if iri == "@id":
+            if self.REFABLE == Refable.no:
+                raise ValueError(
+                    f"{self.__class__.__name__} ({id(self)}) is not referenceable. Property '{iri}' cannot be set to '{value}'"
+                )
+            elif self.REFABLE == Refable.local:
+                if not value.startswith("_:"):
+                    raise ValueError(
+                        f"{self.__class__.__name__} ({id(self)}) can only have local reference. Property '{iri}' cannot be set to '{value}' and must start with '_:'"
+                    )
+            elif self.REFABLE in [Refable.yes, Refable.always]:
+                if value.startswith("_:"):
+                    raise ValueError(
+                        f"{self.__class__.__name__} ({id(self)}) can has mandatory reference. Property '{iri}' cannot be set to '{value}'"
+                    )
+
+        prop, _, _, _ = self.__get_prop(iri)
+        prop.validate(value)
+        self._obj_data[iri] = prop.set(value)
+
+    def __delitem__(self, iri):
+        prop, _, _, _ = self.__get_prop(iri)
+        self._obj_data[iri] = prop.init()
+
+    def __iter__(self):
+        return self._obj_properties.keys()
 
     def walk(self, callback, path=None):
         """
@@ -488,8 +573,8 @@ class SHACLObject(object):
             path = ["."]
 
         if callback(self, path):
-            for json_name, prop, _, _ in self._obj_properties.values():
-                prop.walk(self._obj_data[json_name], callback, path + [f".{json_name}"])
+            for iri, prop, _, _, _ in self.__iter_props():
+                prop.walk(self._obj_data[iri], callback, path + [f".{iri}"])
 
     def child_objects(self):
         """
@@ -514,87 +599,89 @@ class SHACLObject(object):
         for obj in seen:
             yield obj
 
-    def serializer(self, context):
-        if self._id and self._obj_written:
-            return self._id
+    def encode(self, encoder, state, *, is_reference=False):
+        idname = self.ID_ALIAS or self._obj_iris["_id"]
+        if not self._id and self.REFABLE in [Refable.yes, Refable.always]:
+            raise ValueError(
+                f"{self.__class__.__name__} ({id(self)}) must have a '{idname}' property to be referenceable"
+            )
 
-        self._obj_written = True
+        if state.is_written(self):
+            if self.REFABLE == Refable.no:
+                raise ValueError(
+                    f"{self.__class__.__name__} ({id(self)}) is not referenceable"
+                )
+            encoder.write_iri(state.get_object_id(self))
+            return
 
-        d = {
-            context.compact("@type"): context.compact(self.TYPE),
-        }
+        if is_reference and self.REFABLE == Refable.always:
+            raise ValueError(
+                f"{self.__class__.__name__} ({id(self)}) must always be referenced by name, and cannot be inlined"
+            )
 
-        for pyname, v in self._obj_properties.items():
-            json_name, prop, min_count, max_count = v
-            value = self._obj_data[json_name]
-            if prop.elide(value):
-                if min_count:
-                    raise ValueError(
-                        f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) is required (currently {value!r})"
-                    )
-                continue
+        state.add_written(self)
 
-            if min_count is not None:
-                if not prop.check_min_count(value, min_count):
-                    raise ValueError(
-                        f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) requires a minimum of {min_count} elements"
-                    )
+        with encoder.write_object(
+            self,
+            state.get_object_id(self),
+            bool(self._id) or state.is_refed(self),
+        ) as obj_s:
+            for iri, prop, min_count, max_count, pyname in self.__iter_props():
+                value = self._obj_data[iri]
+                if prop.elide(value):
+                    if min_count:
+                        raise ValueError(
+                            f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) is required (currently {value!r})"
+                        )
+                    continue
 
-            if max_count is not None:
-                if not prop.check_max_count(value, max_count):
-                    raise ValueError(
-                        f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) requires a maximum of {max_count} elements"
-                    )
+                if min_count is not None:
+                    if not prop.check_min_count(value, min_count):
+                        raise ValueError(
+                            f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) requires a minimum of {min_count} elements"
+                        )
 
-            with context.vocab_push(json_name):
-                d[context.compact(json_name)] = prop.serializer(value, context)
-        return d
+                if max_count is not None:
+                    if not prop.check_max_count(value, max_count):
+                        raise ValueError(
+                            f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) requires a maximum of {max_count} elements"
+                        )
 
-    def to_jsonld(self, f, *args, **kwargs):
-        """
-        Serialize this object to a JSON LD file
-        """
-        return write_jsonld([self], f, *args, **kwargs)
+                if iri == self._obj_iris["_id"]:
+                    continue
+
+                with obj_s.write_property(iri) as prop_s:
+                    prop.encode(prop_s, value, state)
 
     @classmethod
-    def deserialize(cls, data, context, *, object_ids=None):
-        for t in ("@type", context.compact("@type")):
-            if t not in data:
-                continue
+    def decode(cls, decoder, *, object_ids=None):
+        typ, obj_d = decoder.read_object()
+        if typ is None:
+            raise TypeError("Unable to determine type for object")
 
-            typ = data[t]
-
-            if typ in cls.DESERIALIZERS:
-                break
-
-            typ = context.expand(typ)
-            if typ in cls.DESERIALIZERS:
-                break
-
-            raise Exception(f"Unknown type {data[t]}")
-        else:
-            raise Exception("Unable to determine type for object")
+        if typ not in cls.DESERIALIZERS:
+            raise TypeError(f"Unknown type {typ}")
 
         obj = cls.DESERIALIZERS[typ]()
+        _id = obj_d.read_object_id(obj.ID_ALIAS)
+        if _id is not None:
+            if object_ids is not None:
+                if _id in object_ids:
+                    return object_ids[_id]
+                object_ids[_id] = obj
+            obj._id = _id
 
-        _id = data.get("@id", None) or data.get(context.compact("@id"), None)
-        if _id and _id in object_ids:
-            return object_ids[_id]
+        for iri, prop, _, _, _ in obj.__iter_props():
+            if iri == obj._obj_iris["_id"]:
+                continue
 
-        for pyname, v in obj._obj_properties.items():
-            json_name, prop, _, _ = v
-            for n in (json_name, context.compact(json_name)):
-                if n in data:
-                    with context.vocab_push(json_name):
-                        obj._obj_data[json_name] = prop.deserialize(
-                            data[n],
-                            context,
-                            object_ids=object_ids,
-                        )
-                    break
+            with obj_d.read_property(iri) as prop_d:
+                if prop_d is None:
+                    continue
 
-        if obj._id:
-            object_ids[obj._id] = obj
+                v = prop.decode(prop_d, object_ids=object_ids)
+                prop.validate(v)
+                obj._obj_data[iri] = v
 
         return obj
 
@@ -604,10 +691,9 @@ class SHACLObject(object):
 
         visited.add(self)
 
-        for pyname, v in self._obj_properties.items():
-            json_name, prop, _, _ = v
-            self._obj_data[json_name] = prop.link_prop(
-                self._obj_data[json_name],
+        for iri, prop, _, _, _ in self.__iter_props():
+            self._obj_data[iri] = prop.link_prop(
+                self._obj_data[iri],
                 link_cache,
                 missing,
                 visited,
@@ -641,6 +727,8 @@ class SHACLObject(object):
 
     def __lt__(self, other):
         def sort_key(obj):
+            if isinstance(obj, str):
+                return (obj, "", "", "")
             return (
                 obj._id or "",
                 obj.TYPE,
@@ -656,35 +744,64 @@ def make_context():
     return Context(CONTEXTS)
 
 
-def write_jsonld(objects, f, force_graph=False, **kwargs):
-    """
-    Write a list of objects to a JSON LD file
+class EncodeState(object):
+    def __init__(self):
+        self.ref_objects = set()
+        self.written_objects = set()
+        self.blank_objects = {}
 
-    If force_graph is True, a @graph node will always be written
+    def get_object_id(self, o):
+        if o._id:
+            return o._id
+
+        if o not in self.blank_objects:
+            _id = f"_:{o.__class__.__name__}{len(self.blank_objects)}"
+            self.blank_objects[o] = _id
+
+        return self.blank_objects[o]
+
+    def is_refed(self, o):
+        return o in self.ref_objects
+
+    def add_refed(self, o):
+        self.ref_objects.add(o)
+
+    def is_written(self, o):
+        return o in self.written_objects
+
+    def add_written(self, o):
+        self.written_objects.add(o)
+
+
+def encode_objects(encoder, objects, force_list=False):
+    """
+    Serialize a list of objects to a serialization encoder
+
+    If force_list is true, a list will always be written using the encoder.
     """
     ref_counts = {}
-    id_objects = set()
-    context = make_context()
+    state = EncodeState()
 
     def walk_callback(value, path):
+        nonlocal state
         nonlocal ref_counts
 
         if not isinstance(value, SHACLObject):
             return True
 
-        value._obj_written = False
-
         # Remove blank node ID for re-assignment
         if value._id and value._id.startswith("_:"):
             del value._id
 
-        if value._id:
-            id_objects.add(value)
+        if value._id or value.REFABLE == Refable.always:
+            state.add_refed(value)
 
+        # If the object is referenced more than once, add it to the set of
+        # referenced objects
         ref_counts.setdefault(value, 0)
         ref_counts[value] += 1
         if ref_counts[value] > 1:
-            id_objects.add(value)
+            state.add_refed(value)
             return False
 
         return True
@@ -692,23 +809,19 @@ def write_jsonld(objects, f, force_graph=False, **kwargs):
     for o in objects:
         o.walk(walk_callback)
 
-    for idx, o in enumerate(id_objects):
-        if not o._id:
-            o._id = f"_:{o.__class__.__name__}{idx}"
-
-    use_graph = force_graph or len(objects) > 1
+    use_list = force_list or len(objects) > 1
 
     objects = set(objects)
 
-    if use_graph:
-        # If we are making a graph, put all ID objects in the root
-        objects |= id_objects
+    if use_list:
+        # If we are making a list add all the objects referred to by reference
+        # to the list
+        objects |= state.ref_objects
 
     objects = list(objects)
     objects.sort()
 
-    if use_graph:
-        graph_data = []
+    if use_list:
         # Ensure top level objects are only written in the top level graph
         # node, and referenced by ID everywhere else. This is done by setting
         # the flag that indicates this object has been written for all the top
@@ -718,50 +831,25 @@ def write_jsonld(objects, f, force_graph=False, **kwargs):
         # serialized into the @graph, it will serialize as a string instead of
         # the actual object
         for o in objects:
-            o._obj_written = True
+            state.written_objects.add(o)
 
-        for o in objects:
-            # Allow this specific object to be written now
-            o._obj_written = False
-            graph_data.append(o.serializer(context))
+        with encoder.write_list() as list_s:
+            for o in objects:
+                # Allow this specific object to be written now
+                state.written_objects.remove(o)
+                with list_s.write_list_item() as item_s:
+                    o.encode(item_s, state)
 
-        data = {"@graph": graph_data}
     else:
-        data = objects[0].serializer(context)
-
-    if len(CONTEXT_URLS) == 1:
-        data["@context"] = CONTEXT_URLS[0]
-    elif CONTEXT_URLS:
-        data["@context"] = CONTEXT_URLS
-
-    sha1 = hashlib.sha1()
-    for chunk in json.JSONEncoder(**kwargs).iterencode(data):
-        chunk = chunk.encode("utf-8")
-        f.write(chunk)
-        sha1.update(chunk)
-
-    return sha1.hexdigest()
+        objects[0].encode(encoder, state)
 
 
-def read_jsonld(f):
-    """
-    Read objects from a JSON LD file
-
-    Returns the list of top level objects in the file, and a set of all
-    object_ids that are present in the file
-
-    The returned objects are fully linked
-    """
-    context = make_context()
-    data = json.load(f)
+def decode_objects(decoder):
     object_ids = {}
-    if "@graph" not in data:
-        objects = [SHACLObject.deserialize(data, context, object_ids=object_ids)]
-    else:
-        objects = [
-            SHACLObject.deserialize(o, context, object_ids=object_ids)
-            for o in data["@graph"]
-        ]
+    objects = [
+        SHACLObject.decode(obj_d, object_ids=object_ids)
+        for obj_d in decoder.read_list()
+    ]
 
     for o in objects:
         o.link(object_ids)
@@ -775,6 +863,395 @@ def read_jsonld(f):
     object_ids = {k: v for k, v in object_ids.items() if not k.startswith("_:")}
 
     return objects, object_ids
+
+
+class Decoder(ABC):
+    @abstractmethod
+    def read_string(self):
+        pass
+
+    @abstractmethod
+    def read_integer(self):
+        pass
+
+    @abstractmethod
+    def read_iri(self):
+        pass
+
+    @abstractmethod
+    def read_enum(self, e):
+        pass
+
+    @abstractmethod
+    def read_bool(self):
+        pass
+
+    @abstractmethod
+    def read_float(self):
+        pass
+
+    @abstractmethod
+    def read_list(self):
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def read_property(self, iri):
+        pass
+
+    @abstractmethod
+    def read_object(self):
+        pass
+
+    @abstractmethod
+    def read_object_id(self, alias=None):
+        pass
+
+
+class JSONLDDecoder(Decoder):
+    def __init__(self, data, context):
+        self.data = data
+        self.context = context
+
+    def read_string(self):
+        if isinstance(self.data, str):
+            return self.data
+        return None
+
+    def read_datetime(self):
+        if isinstance(self.data, str):
+            return DateTimeProp.from_string(self.data)
+        return None
+
+    def read_integer(self):
+        if isinstance(self.data, int):
+            return self.data
+        return None
+
+    def read_bool(self):
+        if isinstance(self.data, bool):
+            return self.data
+        return None
+
+    def read_float(self):
+        if isinstance(self.data, (int, float, str)):
+            return float(self.data)
+        return None
+
+    def read_iri(self):
+        if isinstance(self.data, str):
+            return self.context.expand(self.data)
+        return None
+
+    def read_enum(self, e):
+        if isinstance(self.data, str):
+            return self.context.expand_vocab(self.data)
+        return None
+
+    def read_list(self):
+        if isinstance(self.data, (list, tuple, set)):
+            for v in self.data:
+                yield self.__class__(v, self.context)
+        else:
+            yield self
+
+    @contextmanager
+    def read_property(self, iri):
+        for k in (iri, self.context.compact_vocab(iri)):
+            if k in self.data:
+                with self.context.vocab_push(iri):
+                    yield self.__class__(self.data[k], self.context)
+                return
+
+        yield None
+
+    def read_object(self):
+        for k in ("@type", self.context.compact("@type")):
+            if k not in self.data:
+                continue
+
+            typ = self.context.expand(self.data[k])
+            return typ, self
+
+        return None, self
+
+    def read_object_id(self, alias=None):
+        if alias and alias in self.data:
+            return self.data[alias]
+
+        for k in ("@id", self.context.compact("@id")):
+            if k in self.data:
+                return self.data[k]
+
+        return None
+
+
+class JSONLDDeserializer(object):
+    def read(self, f):
+        context = make_context()
+        data = json.load(f)
+        if "@graph" in data:
+            h = JSONLDDecoder(data["@graph"], context)
+        else:
+            h = JSONLDDecoder(data, context)
+
+        return decode_objects(h)
+
+
+class Encoder(ABC):
+    @abstractmethod
+    def write_string(self, v):
+        pass
+
+    @abstractmethod
+    def write_datetime(self, v):
+        pass
+
+    @abstractmethod
+    def write_integer(self, v):
+        pass
+
+    @abstractmethod
+    def write_iri(self, v):
+        pass
+
+    @abstractmethod
+    def write_enum(self, v, e):
+        pass
+
+    @abstractmethod
+    def write_bool(self, v):
+        pass
+
+    @abstractmethod
+    def write_float(self, v):
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def write_property(self, iri):
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def write_object(self, o, _id, needs_id):
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def write_list(self):
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def write_list_item(self):
+        pass
+
+
+class JSONLDEncoder(Encoder):
+    def __init__(self, context, data=None):
+        self.data = data
+        self.context = context
+
+    def write_string(self, v):
+        self.data = v
+
+    def write_datetime(self, v):
+        self.data = DateTimeProp.to_string(v)
+
+    def write_integer(self, v):
+        self.data = v
+
+    def write_iri(self, v):
+        self.write_string(self.context.compact(v))
+
+    def write_enum(self, v, e):
+        self.write_string(self.context.compact_vocab(v))
+
+    def write_bool(self, v):
+        self.data = v
+
+    def write_float(self, v):
+        self.data = str(v)
+
+    @contextmanager
+    def write_property(self, iri):
+        s = self.__class__(self.context, None)
+        with self.context.vocab_push(iri):
+            yield s
+        if s.data is not None:
+            self.data[self.context.compact_vocab(iri)] = s.data
+
+    @contextmanager
+    def write_object(self, o, _id, needs_id):
+        self.data = {
+            self.context.compact("@type"): self.context.compact_vocab(o.TYPE),
+        }
+        if needs_id:
+            self.data[o.ID_ALIAS or self.context.compact("@id")] = self.context.compact(
+                _id
+            )
+        yield self
+
+    @contextmanager
+    def write_list(self):
+        self.data = []
+        yield self
+        if not self.data:
+            self.data = None
+
+    @contextmanager
+    def write_list_item(self):
+        s = self.__class__(self.context, None)
+        yield s
+        if s.data is not None:
+            self.data.append(s.data)
+
+
+class JSONLDSerializer(object):
+    def serialize_data(self, objects, force_graph=False):
+        context = make_context()
+        h = JSONLDEncoder(context)
+        encode_objects(h, objects, force_graph)
+        if isinstance(h.data, list):
+            data = {
+                "@graph": h.data,
+            }
+        else:
+            data = h.data
+
+        if len(CONTEXT_URLS) == 1:
+            data["@context"] = CONTEXT_URLS[0]
+        elif CONTEXT_URLS:
+            data["@context"] = CONTEXT_URLS
+
+        return data
+
+    def write(self, objects, f, force_graph=False, **kwargs):
+        """
+        Write a list of objects to a JSON LD file
+
+        If force_graph is True, a @graph node will always be written
+        """
+        data = self.serialize_data(objects, force_graph)
+
+        sha1 = hashlib.sha1()
+        for chunk in json.JSONEncoder(**kwargs).iterencode(data):
+            chunk = chunk.encode("utf-8")
+            f.write(chunk)
+            sha1.update(chunk)
+
+        return sha1.hexdigest()
+
+
+class JSONLDInlineEncoder(Encoder):
+    def __init__(self, f, context, sha1):
+        self.f = f
+        self.context = context
+        self.comma = False
+        self.sha1 = sha1
+
+    def write(self, s):
+        s = s.encode("utf-8")
+        self.f.write(s)
+        self.sha1.update(s)
+
+    def _write_comma(self):
+        if self.comma:
+            self.write(",")
+            self.comma = False
+
+    def _need_comma(self):
+        self.comma = True
+
+    def write_string(self, v):
+        self.write(f'"{v}"')
+
+    def write_datetime(self, v):
+        self.write('"' + DateTimeProp.to_string(v) + '"')
+
+    def write_integer(self, v):
+        self.write(f"{v}")
+
+    def write_iri(self, v):
+        self.write_string(self.context.compact(v))
+
+    def write_enum(self, v, e):
+        self.write_iri(v)
+
+    def write_bool(self, v):
+        if v:
+            self.write("true")
+        else:
+            self.write("false")
+
+    def write_float(self, v):
+        self.write(f'"{v}"')
+
+    @contextmanager
+    def write_property(self, iri):
+        self._write_comma()
+        p = self.context.compact(iri)
+        self.write(f'"{p}":')
+        with self.context.vocab_push(iri):
+            yield self
+        self.comma = True
+
+    @contextmanager
+    def write_object(self, o, _id, needs_id):
+        self._write_comma()
+
+        typname = self.context.compact("@type")
+        typval = self.context.compact_vocab(o.TYPE)
+        self.write("{")
+        if needs_id:
+            idname = o.ID_ALIAS or self.context.compact("@id")
+            idval = self.context.compact(_id)
+            self.write(f'"{idname}": "{idval}",')
+        self.write(f'"{typname}":"{typval}"')
+
+        self.comma = True
+        yield self
+
+        self.write("}")
+        self.comma = True
+
+    @contextmanager
+    def write_list(self):
+        self._write_comma()
+        self.write("[")
+        yield self.__class__(self.f, self.context, self.sha1)
+        self.write("]")
+        self.comma = True
+
+    @contextmanager
+    def write_list_item(self):
+        self._write_comma()
+        yield self.__class__(self.f, self.context, self.sha1)
+        self.comma = True
+
+
+class JSONLDInlineSerializer(object):
+    def write(self, objects, f):
+        """
+        Write a list of objects to a JSON LD file
+        """
+        sha1 = hashlib.sha1()
+        h = JSONLDInlineEncoder(f, make_context(), sha1)
+        h.write('{"@context":')
+        if len(CONTEXT_URLS) == 1:
+            h.write(f'"{CONTEXT_URLS[0]}"')
+        elif CONTEXT_URLS:
+            h.write('["')
+            h.write('","'.join(CONTEXT_URLS))
+            h.write('"]')
+        h.write(",")
+
+        h.write('"@graph":')
+
+        encode_objects(h, objects, True)
+        h.write("}")
+        return sha1.hexdigest()
 
 
 def print_tree(objects, all_fields=False):
@@ -861,15 +1338,30 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/AI/autonomyType",
             "@type": "@vocab",
         },
-        "ai_domain": "https://rdf.spdx.org/v3/AI/domain",
-        "ai_energyConsumption": "https://rdf.spdx.org/v3/AI/energyConsumption",
+        "ai_domain" : {
+            "@id": "https://rdf.spdx.org/v3/AI/domain",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "ai_energyConsumption" : {
+            "@id": "https://rdf.spdx.org/v3/AI/energyConsumption",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "ai_hyperparameter" : {
             "@id": "https://rdf.spdx.org/v3/AI/hyperparameter",
             "@type": "@id",
         },
-        "ai_informationAboutApplication": "https://rdf.spdx.org/v3/AI/informationAboutApplication",
-        "ai_informationAboutTraining": "https://rdf.spdx.org/v3/AI/informationAboutTraining",
-        "ai_limitation": "https://rdf.spdx.org/v3/AI/limitation",
+        "ai_informationAboutApplication" : {
+            "@id": "https://rdf.spdx.org/v3/AI/informationAboutApplication",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "ai_informationAboutTraining" : {
+            "@id": "https://rdf.spdx.org/v3/AI/informationAboutTraining",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "ai_limitation" : {
+            "@id": "https://rdf.spdx.org/v3/AI/limitation",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "ai_metric" : {
             "@id": "https://rdf.spdx.org/v3/AI/metric",
             "@type": "@id",
@@ -878,8 +1370,14 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/AI/metricDecisionThreshold",
             "@type": "@id",
         },
-        "ai_modelDataPreprocessing": "https://rdf.spdx.org/v3/AI/modelDataPreprocessing",
-        "ai_modelExplainability": "https://rdf.spdx.org/v3/AI/modelExplainability",
+        "ai_modelDataPreprocessing" : {
+            "@id": "https://rdf.spdx.org/v3/AI/modelDataPreprocessing",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "ai_modelExplainability" : {
+            "@id": "https://rdf.spdx.org/v3/AI/modelExplainability",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "ai_safetyRiskAssessment" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/",
@@ -894,8 +1392,14 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/AI/sensitivePersonalInformation",
             "@type": "@vocab",
         },
-        "ai_standardCompliance": "https://rdf.spdx.org/v3/AI/standardCompliance",
-        "ai_typeOfModel": "https://rdf.spdx.org/v3/AI/typeOfModel",
+        "ai_standardCompliance" : {
+            "@id": "https://rdf.spdx.org/v3/AI/standardCompliance",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "ai_typeOfModel" : {
+            "@id": "https://rdf.spdx.org/v3/AI/typeOfModel",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "algorithm" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Core/HashAlgorithm/",
@@ -910,18 +1414,39 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Core/annotationType",
             "@type": "@vocab",
         },
-        "beginIntegerRange": "https://rdf.spdx.org/v3/Core/beginIntegerRange",
+        "beginIntegerRange" : {
+            "@id": "https://rdf.spdx.org/v3/Core/beginIntegerRange",
+            "@type": "http://www.w3.org/2001/XMLSchema#positiveInteger",
+        },
         "build_Build": "https://rdf.spdx.org/v3/Build/Build",
-        "build_buildEndTime": "https://rdf.spdx.org/v3/Build/buildEndTime",
-        "build_buildId": "https://rdf.spdx.org/v3/Build/buildId",
-        "build_buildStartTime": "https://rdf.spdx.org/v3/Build/buildStartTime",
-        "build_buildType": "https://rdf.spdx.org/v3/Build/buildType",
+        "build_buildEndTime" : {
+            "@id": "https://rdf.spdx.org/v3/Build/buildEndTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "build_buildId" : {
+            "@id": "https://rdf.spdx.org/v3/Build/buildId",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "build_buildStartTime" : {
+            "@id": "https://rdf.spdx.org/v3/Build/buildStartTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "build_buildType" : {
+            "@id": "https://rdf.spdx.org/v3/Build/buildType",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
         "build_configSourceDigest" : {
             "@id": "https://rdf.spdx.org/v3/Build/configSourceDigest",
             "@type": "@id",
         },
-        "build_configSourceEntrypoint": "https://rdf.spdx.org/v3/Build/configSourceEntrypoint",
-        "build_configSourceUri": "https://rdf.spdx.org/v3/Build/configSourceUri",
+        "build_configSourceEntrypoint" : {
+            "@id": "https://rdf.spdx.org/v3/Build/configSourceEntrypoint",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "build_configSourceUri" : {
+            "@id": "https://rdf.spdx.org/v3/Build/configSourceUri",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
         "build_environment" : {
             "@id": "https://rdf.spdx.org/v3/Build/environment",
             "@type": "@id",
@@ -930,8 +1455,14 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Build/parameters",
             "@type": "@id",
         },
-        "builtTime": "https://rdf.spdx.org/v3/Core/builtTime",
-        "comment": "https://rdf.spdx.org/v3/Core/comment",
+        "builtTime" : {
+            "@id": "https://rdf.spdx.org/v3/Core/builtTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "comment" : {
+            "@id": "https://rdf.spdx.org/v3/Core/comment",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "completeness" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Core/RelationshipCompleteness/",
@@ -939,9 +1470,18 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Core/completeness",
             "@type": "@vocab",
         },
-        "contentType": "https://rdf.spdx.org/v3/Core/contentType",
-        "context": "https://rdf.spdx.org/v3/Core/context",
-        "created": "https://rdf.spdx.org/v3/Core/created",
+        "contentType" : {
+            "@id": "https://rdf.spdx.org/v3/Core/contentType",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "context" : {
+            "@id": "https://rdf.spdx.org/v3/Core/context",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "created" : {
+            "@id": "https://rdf.spdx.org/v3/Core/created",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
         "createdBy" : {
             "@id": "https://rdf.spdx.org/v3/Core/createdBy",
             "@type": "@id",
@@ -962,7 +1502,10 @@ CONTEXTS = [
         "dataset_Dataset": "https://rdf.spdx.org/v3/Dataset/Dataset",
         "dataset_DatasetAvailabilityType": "https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType",
         "dataset_DatasetType": "https://rdf.spdx.org/v3/Dataset/DatasetType",
-        "dataset_anonymizationMethodUsed": "https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
+        "dataset_anonymizationMethodUsed" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "dataset_confidentialityLevel" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType/",
@@ -970,8 +1513,14 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Dataset/confidentialityLevel",
             "@type": "@vocab",
         },
-        "dataset_dataCollectionProcess": "https://rdf.spdx.org/v3/Dataset/dataCollectionProcess",
-        "dataset_dataPreprocessing": "https://rdf.spdx.org/v3/Dataset/dataPreprocessing",
+        "dataset_dataCollectionProcess" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/dataCollectionProcess",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "dataset_dataPreprocessing" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/dataPreprocessing",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "dataset_datasetAvailability" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/",
@@ -979,8 +1528,14 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Dataset/datasetAvailability",
             "@type": "@vocab",
         },
-        "dataset_datasetNoise": "https://rdf.spdx.org/v3/Dataset/datasetNoise",
-        "dataset_datasetSize": "https://rdf.spdx.org/v3/Dataset/datasetSize",
+        "dataset_datasetNoise" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/datasetNoise",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "dataset_datasetSize" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/datasetSize",
+            "@type": "http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
+        },
         "dataset_datasetType" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Dataset/DatasetType/",
@@ -988,9 +1543,18 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Dataset/datasetType",
             "@type": "@vocab",
         },
-        "dataset_datasetUpdateMechanism": "https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
-        "dataset_intendedUse": "https://rdf.spdx.org/v3/Dataset/intendedUse",
-        "dataset_knownBias": "https://rdf.spdx.org/v3/Dataset/knownBias",
+        "dataset_datasetUpdateMechanism" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "dataset_intendedUse" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/intendedUse",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "dataset_knownBias" : {
+            "@id": "https://rdf.spdx.org/v3/Dataset/knownBias",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "dataset_sensitivePersonalInformation" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/",
@@ -1006,13 +1570,22 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Core/definingArtifact",
             "@type": "@id",
         },
-        "description": "https://rdf.spdx.org/v3/Core/description",
+        "description" : {
+            "@id": "https://rdf.spdx.org/v3/Core/description",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "element" : {
             "@id": "https://rdf.spdx.org/v3/Core/element",
             "@type": "@id",
         },
-        "endIntegerRange": "https://rdf.spdx.org/v3/Core/endIntegerRange",
-        "endTime": "https://rdf.spdx.org/v3/Core/endTime",
+        "endIntegerRange" : {
+            "@id": "https://rdf.spdx.org/v3/Core/endIntegerRange",
+            "@type": "http://www.w3.org/2001/XMLSchema#positiveInteger",
+        },
+        "endTime" : {
+            "@id": "https://rdf.spdx.org/v3/Core/endTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
         "expandedlicensing_ConjunctiveLicenseSet": "https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet",
         "expandedlicensing_CustomLicense": "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense",
         "expandedlicensing_CustomLicenseAddition": "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicenseAddition",
@@ -1025,23 +1598,62 @@ CONTEXTS = [
         "expandedlicensing_ListedLicenseException": "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicenseException",
         "expandedlicensing_OrLaterOperator": "https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOperator",
         "expandedlicensing_WithAdditionOperator": "https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditionOperator",
-        "expandedlicensing_additionText": "https://rdf.spdx.org/v3/ExpandedLicensing/additionText",
-        "expandedlicensing_deprecatedVersion": "https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
-        "expandedlicensing_isDeprecatedAdditionId": "https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedAdditionId",
-        "expandedlicensing_isDeprecatedLicenseId": "https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedLicenseId",
-        "expandedlicensing_isFsfLibre": "https://rdf.spdx.org/v3/ExpandedLicensing/isFsfLibre",
-        "expandedlicensing_isOsiApproved": "https://rdf.spdx.org/v3/ExpandedLicensing/isOsiApproved",
-        "expandedlicensing_licenseXml": "https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
-        "expandedlicensing_listVersionAdded": "https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
+        "expandedlicensing_additionText" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/additionText",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "expandedlicensing_deprecatedVersion" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "expandedlicensing_isDeprecatedAdditionId" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedAdditionId",
+            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
+        },
+        "expandedlicensing_isDeprecatedLicenseId" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedLicenseId",
+            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
+        },
+        "expandedlicensing_isFsfLibre" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isFsfLibre",
+            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
+        },
+        "expandedlicensing_isOsiApproved" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isOsiApproved",
+            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
+        },
+        "expandedlicensing_licenseXml" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "expandedlicensing_listVersionAdded" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "expandedlicensing_member" : {
             "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/member",
             "@type": "@id",
         },
-        "expandedlicensing_obsoletedBy": "https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
-        "expandedlicensing_seeAlso": "https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
-        "expandedlicensing_standardAdditionTemplate": "https://rdf.spdx.org/v3/ExpandedLicensing/standardAdditionTemplate",
-        "expandedlicensing_standardLicenseHeader": "https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseHeader",
-        "expandedlicensing_standardLicenseTemplate": "https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseTemplate",
+        "expandedlicensing_obsoletedBy" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "expandedlicensing_seeAlso" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "expandedlicensing_standardAdditionTemplate" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/standardAdditionTemplate",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "expandedlicensing_standardLicenseHeader" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseHeader",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "expandedlicensing_standardLicenseTemplate" : {
+            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseTemplate",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "expandedlicensing_subjectAddition" : {
             "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/subjectAddition",
             "@type": "@id",
@@ -1081,24 +1693,55 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Core/externalRefType",
             "@type": "@vocab",
         },
-        "externalSpdxId": "https://rdf.spdx.org/v3/Core/externalSpdxId",
+        "externalSpdxId" : {
+            "@id": "https://rdf.spdx.org/v3/Core/externalSpdxId",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
         "from" : {
             "@id": "https://rdf.spdx.org/v3/Core/from",
             "@type": "@id",
         },
-        "hashValue": "https://rdf.spdx.org/v3/Core/hashValue",
-        "identifier": "https://rdf.spdx.org/v3/Core/identifier",
-        "identifierLocator": "https://rdf.spdx.org/v3/Core/identifierLocator",
+        "hashValue" : {
+            "@id": "https://rdf.spdx.org/v3/Core/hashValue",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "id": "@id",
+        "identifier" : {
+            "@id": "https://rdf.spdx.org/v3/Core/identifier",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "identifierLocator" : {
+            "@id": "https://rdf.spdx.org/v3/Core/identifierLocator",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
         "imports" : {
             "@id": "https://rdf.spdx.org/v3/Core/imports",
             "@type": "@id",
         },
-        "issuingAuthority": "https://rdf.spdx.org/v3/Core/issuingAuthority",
-        "key": "https://rdf.spdx.org/v3/Core/key",
-        "locationHint": "https://rdf.spdx.org/v3/Core/locationHint",
-        "locator": "https://rdf.spdx.org/v3/Core/locator",
-        "name": "https://rdf.spdx.org/v3/Core/name",
-        "namespace": "https://rdf.spdx.org/v3/Core/namespace",
+        "issuingAuthority" : {
+            "@id": "https://rdf.spdx.org/v3/Core/issuingAuthority",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "key" : {
+            "@id": "https://rdf.spdx.org/v3/Core/key",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "locationHint" : {
+            "@id": "https://rdf.spdx.org/v3/Core/locationHint",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "locator" : {
+            "@id": "https://rdf.spdx.org/v3/Core/locator",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "name" : {
+            "@id": "https://rdf.spdx.org/v3/Core/name",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "namespace" : {
+            "@id": "https://rdf.spdx.org/v3/Core/namespace",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
         "namespaceMap" : {
             "@id": "https://rdf.spdx.org/v3/Core/namespaceMap",
             "@type": "@id",
@@ -1107,8 +1750,14 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Core/originatedBy",
             "@type": "@id",
         },
-        "packageVerificationCodeExcludedFile": "https://rdf.spdx.org/v3/Core/packageVerificationCodeExcludedFile",
-        "prefix": "https://rdf.spdx.org/v3/Core/prefix",
+        "packageVerificationCodeExcludedFile" : {
+            "@id": "https://rdf.spdx.org/v3/Core/packageVerificationCodeExcludedFile",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "prefix" : {
+            "@id": "https://rdf.spdx.org/v3/Core/prefix",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "profileConformance" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Core/ProfileIdentifierType/",
@@ -1123,7 +1772,10 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Core/relationshipType",
             "@type": "@vocab",
         },
-        "releaseTime": "https://rdf.spdx.org/v3/Core/releaseTime",
+        "releaseTime" : {
+            "@id": "https://rdf.spdx.org/v3/Core/releaseTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
         "rootElement" : {
             "@id": "https://rdf.spdx.org/v3/Core/rootElement",
             "@type": "@id",
@@ -1152,8 +1804,14 @@ CONTEXTS = [
         "security_VexVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VexVulnAssessmentRelationship",
         "security_VulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VulnAssessmentRelationship",
         "security_Vulnerability": "https://rdf.spdx.org/v3/Security/Vulnerability",
-        "security_actionStatement": "https://rdf.spdx.org/v3/Security/actionStatement",
-        "security_actionStatementTime": "https://rdf.spdx.org/v3/Security/actionStatementTime",
+        "security_actionStatement" : {
+            "@id": "https://rdf.spdx.org/v3/Security/actionStatement",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "security_actionStatementTime" : {
+            "@id": "https://rdf.spdx.org/v3/Security/actionStatementTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
         "security_assessedElement" : {
             "@id": "https://rdf.spdx.org/v3/Security/assessedElement",
             "@type": "@id",
@@ -1172,9 +1830,18 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Security/decisionType",
             "@type": "@vocab",
         },
-        "security_exploited": "https://rdf.spdx.org/v3/Security/exploited",
-        "security_impactStatement": "https://rdf.spdx.org/v3/Security/impactStatement",
-        "security_impactStatementTime": "https://rdf.spdx.org/v3/Security/impactStatementTime",
+        "security_exploited" : {
+            "@id": "https://rdf.spdx.org/v3/Security/exploited",
+            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
+        },
+        "security_impactStatement" : {
+            "@id": "https://rdf.spdx.org/v3/Security/impactStatement",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "security_impactStatementTime" : {
+            "@id": "https://rdf.spdx.org/v3/Security/impactStatementTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
         "security_justificationType" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Security/VexJustificationType/",
@@ -1182,12 +1849,30 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Security/justificationType",
             "@type": "@vocab",
         },
-        "security_locator": "https://rdf.spdx.org/v3/Security/locator",
-        "security_modifiedTime": "https://rdf.spdx.org/v3/Security/modifiedTime",
-        "security_percentile": "https://rdf.spdx.org/v3/Security/percentile",
-        "security_probability": "https://rdf.spdx.org/v3/Security/probability",
-        "security_publishedTime": "https://rdf.spdx.org/v3/Security/publishedTime",
-        "security_score": "https://rdf.spdx.org/v3/Security/score",
+        "security_locator" : {
+            "@id": "https://rdf.spdx.org/v3/Security/locator",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "security_modifiedTime" : {
+            "@id": "https://rdf.spdx.org/v3/Security/modifiedTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "security_percentile" : {
+            "@id": "https://rdf.spdx.org/v3/Security/percentile",
+            "@type": "http://www.w3.org/2001/XMLSchema#decimal",
+        },
+        "security_probability" : {
+            "@id": "https://rdf.spdx.org/v3/Security/probability",
+            "@type": "http://www.w3.org/2001/XMLSchema#decimal",
+        },
+        "security_publishedTime" : {
+            "@id": "https://rdf.spdx.org/v3/Security/publishedTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "security_score" : {
+            "@id": "https://rdf.spdx.org/v3/Security/score",
+            "@type": "http://www.w3.org/2001/XMLSchema#decimal",
+        },
         "security_severity" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Security/CvssSeverityType/",
@@ -1195,10 +1880,22 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Security/severity",
             "@type": "@vocab",
         },
-        "security_statusNotes": "https://rdf.spdx.org/v3/Security/statusNotes",
-        "security_vectorString": "https://rdf.spdx.org/v3/Security/vectorString",
-        "security_vexVersion": "https://rdf.spdx.org/v3/Security/vexVersion",
-        "security_withdrawnTime": "https://rdf.spdx.org/v3/Security/withdrawnTime",
+        "security_statusNotes" : {
+            "@id": "https://rdf.spdx.org/v3/Security/statusNotes",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "security_vectorString" : {
+            "@id": "https://rdf.spdx.org/v3/Security/vectorString",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "security_vexVersion" : {
+            "@id": "https://rdf.spdx.org/v3/Security/vexVersion",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "security_withdrawnTime" : {
+            "@id": "https://rdf.spdx.org/v3/Security/withdrawnTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
         "simplelicensing_AnyLicenseInfo": "https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo",
         "simplelicensing_LicenseExpression": "https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression",
         "simplelicensing_SimpleLicensingText": "https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensingText",
@@ -1206,9 +1903,18 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/SimpleLicensing/customIdToUri",
             "@type": "@id",
         },
-        "simplelicensing_licenseExpression": "https://rdf.spdx.org/v3/SimpleLicensing/licenseExpression",
-        "simplelicensing_licenseListVersion": "https://rdf.spdx.org/v3/SimpleLicensing/licenseListVersion",
-        "simplelicensing_licenseText": "https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
+        "simplelicensing_licenseExpression" : {
+            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/licenseExpression",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "simplelicensing_licenseListVersion" : {
+            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/licenseListVersion",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "simplelicensing_licenseText" : {
+            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "software_File": "https://rdf.spdx.org/v3/Software/File",
         "software_Package": "https://rdf.spdx.org/v3/Software/Package",
         "software_Sbom": "https://rdf.spdx.org/v3/Software/Sbom",
@@ -1223,17 +1929,50 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Software/additionalPurpose",
             "@type": "@vocab",
         },
-        "software_attributionText": "https://rdf.spdx.org/v3/Software/attributionText",
-        "software_byteRange": "https://rdf.spdx.org/v3/Software/byteRange",
-        "software_contentType": "https://rdf.spdx.org/v3/Software/contentType",
-        "software_copyrightText": "https://rdf.spdx.org/v3/Software/copyrightText",
-        "software_downloadLocation": "https://rdf.spdx.org/v3/Software/downloadLocation",
-        "software_gitoid": "https://rdf.spdx.org/v3/Software/gitoid",
-        "software_homePage": "https://rdf.spdx.org/v3/Software/homePage",
-        "software_isDirectory": "https://rdf.spdx.org/v3/Software/isDirectory",
-        "software_lineRange": "https://rdf.spdx.org/v3/Software/lineRange",
-        "software_packageUrl": "https://rdf.spdx.org/v3/Software/packageUrl",
-        "software_packageVersion": "https://rdf.spdx.org/v3/Software/packageVersion",
+        "software_attributionText" : {
+            "@id": "https://rdf.spdx.org/v3/Software/attributionText",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "software_byteRange" : {
+            "@id": "https://rdf.spdx.org/v3/Software/byteRange",
+            "@type": "https://rdf.spdx.org/v3/Core/PositiveIntegerRange",
+        },
+        "software_contentType" : {
+            "@id": "https://rdf.spdx.org/v3/Software/contentType",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "software_copyrightText" : {
+            "@id": "https://rdf.spdx.org/v3/Software/copyrightText",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "software_downloadLocation" : {
+            "@id": "https://rdf.spdx.org/v3/Software/downloadLocation",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "software_gitoid" : {
+            "@id": "https://rdf.spdx.org/v3/Software/gitoid",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "software_homePage" : {
+            "@id": "https://rdf.spdx.org/v3/Software/homePage",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "software_isDirectory" : {
+            "@id": "https://rdf.spdx.org/v3/Software/isDirectory",
+            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
+        },
+        "software_lineRange" : {
+            "@id": "https://rdf.spdx.org/v3/Software/lineRange",
+            "@type": "https://rdf.spdx.org/v3/Core/PositiveIntegerRange",
+        },
+        "software_packageUrl" : {
+            "@id": "https://rdf.spdx.org/v3/Software/packageUrl",
+            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
+        },
+        "software_packageVersion" : {
+            "@id": "https://rdf.spdx.org/v3/Software/packageVersion",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "software_primaryPurpose" : {
             "@context" : {
                 "@vocab": "https://rdf.spdx.org/v3/Software/SoftwarePurpose/",
@@ -1252,18 +1991,36 @@ CONTEXTS = [
             "@id": "https://rdf.spdx.org/v3/Software/snippetFromFile",
             "@type": "@id",
         },
-        "software_sourceInfo": "https://rdf.spdx.org/v3/Software/sourceInfo",
+        "software_sourceInfo" : {
+            "@id": "https://rdf.spdx.org/v3/Software/sourceInfo",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "spdx": "https://rdf.spdx.org/v3/",
         "spdxId": "@id",
-        "specVersion": "https://rdf.spdx.org/v3/Core/specVersion",
-        "standardName": "https://rdf.spdx.org/v3/Core/standardName",
-        "startTime": "https://rdf.spdx.org/v3/Core/startTime",
-        "statement": "https://rdf.spdx.org/v3/Core/statement",
+        "specVersion" : {
+            "@id": "https://rdf.spdx.org/v3/Core/specVersion",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "standardName" : {
+            "@id": "https://rdf.spdx.org/v3/Core/standardName",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
+        "startTime" : {
+            "@id": "https://rdf.spdx.org/v3/Core/startTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "statement" : {
+            "@id": "https://rdf.spdx.org/v3/Core/statement",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "subject" : {
             "@id": "https://rdf.spdx.org/v3/Core/subject",
             "@type": "@id",
         },
-        "summary": "https://rdf.spdx.org/v3/Core/summary",
+        "summary" : {
+            "@id": "https://rdf.spdx.org/v3/Core/summary",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "suppliedBy" : {
             "@id": "https://rdf.spdx.org/v3/Core/suppliedBy",
             "@type": "@id",
@@ -1280,8 +2037,14 @@ CONTEXTS = [
             "@type": "@id",
         },
         "type": "@type",
-        "validUntilTime": "https://rdf.spdx.org/v3/Core/validUntilTime",
-        "value": "https://rdf.spdx.org/v3/Core/value",
+        "validUntilTime" : {
+            "@id": "https://rdf.spdx.org/v3/Core/validUntilTime",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+        },
+        "value" : {
+            "@id": "https://rdf.spdx.org/v3/Core/value",
+            "@type": "http://www.w3.org/2001/XMLSchema#string",
+        },
         "verifiedUsing" : {
             "@id": "https://rdf.spdx.org/v3/Core/verifiedUsing",
             "@type": "@id",
@@ -2171,6 +2934,8 @@ class software_SoftwarePurpose(EnumProp):
 # Provides information about the creation of the Element.
 class CreationInfo(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/CreationInfo"
+    REFABLE = Refable.local
+    ID_ALIAS = "id"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2178,33 +2943,33 @@ class CreationInfo(SHACLObject):
         self._add_property(
             "comment",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/comment",
+            iri="https://rdf.spdx.org/v3/Core/comment",
+        )
+        # Identifies when the Element was originally created.
+        self._add_property(
+            "created",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Core/created",
+            min_count=1,
         )
         # Identifies who or what created the Element.
         self._add_property(
             "createdBy",
             ListProp(ObjectProp(Agent, False)),
-            json_name="https://rdf.spdx.org/v3/Core/createdBy",
+            iri="https://rdf.spdx.org/v3/Core/createdBy",
             min_count=1,
         )
         # Identifies the tooling that was used during the creation of the Element.
         self._add_property(
             "createdUsing",
             ListProp(ObjectProp(Tool, False)),
-            json_name="https://rdf.spdx.org/v3/Core/createdUsing",
+            iri="https://rdf.spdx.org/v3/Core/createdUsing",
         )
         # Provides a reference number that can be used to understand how to parse and interpret an Element.
         self._add_property(
             "specVersion",
-            SemVerProp(),
-            json_name="https://rdf.spdx.org/v3/Core/specVersion",
-            min_count=1,
-        )
-        # Identifies when the Element was originally created.
-        self._add_property(
-            "created",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/created",
+            StringProp(pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",),
+            iri="https://rdf.spdx.org/v3/Core/specVersion",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -2216,6 +2981,7 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/CreationInfo"] = Creatio
 # A key with an associated value.
 class DictionaryEntry(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/DictionaryEntry"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2223,14 +2989,14 @@ class DictionaryEntry(SHACLObject):
         self._add_property(
             "key",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/key",
+            iri="https://rdf.spdx.org/v3/Core/key",
             min_count=1,
         )
         # A value used in a generic key-value pair.
         self._add_property(
             "value",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/value",
+            iri="https://rdf.spdx.org/v3/Core/value",
         )
         self._set_init_props(**kwargs)
 
@@ -2241,65 +3007,67 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/DictionaryEntry"] = Dict
 # Base domain class from which all other SPDX-3.0 domain classes derive.
 class Element(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/Element"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Points to a resource outside the scope of the SPDX-3.0 content
-        # that provides additional characteristics of an Element.
-        self._add_property(
-            "externalRef",
-            ListProp(ObjectProp(ExternalRef, False)),
-            json_name="https://rdf.spdx.org/v3/Core/externalRef",
-        )
         # Provide consumers with comments by the creator of the Element about the Element.
         self._add_property(
             "comment",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/comment",
-        )
-        # Specifies an Extension characterization of some aspect of an Element.
-        self._add_property(
-            "extension",
-            ListProp(ObjectProp(extension_Extension, False)),
-            json_name="https://rdf.spdx.org/v3/Core/extension",
-        )
-        # A short description of an Element.
-        self._add_property(
-            "summary",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/summary",
+            iri="https://rdf.spdx.org/v3/Core/comment",
         )
         # Provides information about the creation of the Element.
         self._add_property(
             "creationInfo",
             ObjectProp(CreationInfo, True),
-            json_name="https://rdf.spdx.org/v3/Core/creationInfo",
+            iri="https://rdf.spdx.org/v3/Core/creationInfo",
             min_count=1,
+        )
+        # Provides a detailed description of the Element.
+        self._add_property(
+            "description",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Core/description",
+        )
+        # Specifies an Extension characterization of some aspect of an Element.
+        self._add_property(
+            "extension",
+            ListProp(ObjectProp(extension_Extension, False)),
+            iri="https://rdf.spdx.org/v3/Core/extension",
         )
         # Provides a reference to a resource outside the scope of SPDX-3.0 content
         # that uniquely identifies an Element.
         self._add_property(
             "externalIdentifier",
             ListProp(ObjectProp(ExternalIdentifier, False)),
-            json_name="https://rdf.spdx.org/v3/Core/externalIdentifier",
+            iri="https://rdf.spdx.org/v3/Core/externalIdentifier",
+        )
+        # Points to a resource outside the scope of the SPDX-3.0 content
+        # that provides additional characteristics of an Element.
+        self._add_property(
+            "externalRef",
+            ListProp(ObjectProp(ExternalRef, False)),
+            iri="https://rdf.spdx.org/v3/Core/externalRef",
         )
         # Identifies the name of an Element as designated by the creator.
         self._add_property(
             "name",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/name",
+            iri="https://rdf.spdx.org/v3/Core/name",
         )
-        # Provides a detailed description of the Element.
+        # A short description of an Element.
         self._add_property(
-            "description",
+            "summary",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/description",
+            iri="https://rdf.spdx.org/v3/Core/summary",
         )
         # Provides an IntegrityMethod with which the integrity of an Element can be asserted.
         self._add_property(
             "verifiedUsing",
             ListProp(ObjectProp(IntegrityMethod, False)),
-            json_name="https://rdf.spdx.org/v3/Core/verifiedUsing",
+            iri="https://rdf.spdx.org/v3/Core/verifiedUsing",
         )
         self._set_init_props(**kwargs)
 
@@ -2310,26 +3078,28 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Element"] = Element
 # A collection of Elements, not necessarily with unifying context.
 class ElementCollection(Element):
     TYPE = "https://rdf.spdx.org/v3/Core/ElementCollection"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
+        # Refers to one or more Elements that are part of an ElementCollection.
+        self._add_property(
+            "element",
+            ListProp(ObjectProp(Element, False)),
+            iri="https://rdf.spdx.org/v3/Core/element",
+        )
         # Describes one a profile which the creator of this ElementCollection intends to conform to.
         self._add_property(
             "profileConformance",
             ListProp(ProfileIdentifierType()),
-            json_name="https://rdf.spdx.org/v3/Core/profileConformance",
+            iri="https://rdf.spdx.org/v3/Core/profileConformance",
         )
         # This property is used to denote the root Element(s) of a tree of elements contained in an SBOM.
         self._add_property(
             "rootElement",
             ListProp(ObjectProp(Element, False)),
-            json_name="https://rdf.spdx.org/v3/Core/rootElement",
-        )
-        # Refers to one or more Elements that are part of an ElementCollection.
-        self._add_property(
-            "element",
-            ListProp(ObjectProp(Element, False)),
-            json_name="https://rdf.spdx.org/v3/Core/element",
+            iri="https://rdf.spdx.org/v3/Core/rootElement",
         )
         self._set_init_props(**kwargs)
 
@@ -2340,40 +3110,41 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ElementCollection"] = El
 # A reference to a resource outside the scope of SPDX-3.0 content that uniquely identifies an Element.
 class ExternalIdentifier(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/ExternalIdentifier"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
+        # Provide consumers with comments by the creator of the Element about the Element.
+        self._add_property(
+            "comment",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Core/comment",
+        )
         # Specifies the type of the external identifier.
         self._add_property(
             "externalIdentifierType",
             ExternalIdentifierType(),
-            json_name="https://rdf.spdx.org/v3/Core/externalIdentifierType",
+            iri="https://rdf.spdx.org/v3/Core/externalIdentifierType",
             min_count=1,
         )
         # Uniquely identifies an external element.
         self._add_property(
             "identifier",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/identifier",
+            iri="https://rdf.spdx.org/v3/Core/identifier",
             min_count=1,
-        )
-        # An entity that is authorized to issue identification credentials.
-        self._add_property(
-            "issuingAuthority",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/issuingAuthority",
-        )
-        # Provide consumers with comments by the creator of the Element about the Element.
-        self._add_property(
-            "comment",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/comment",
         )
         # Provides the location for more information regarding an external identifier.
         self._add_property(
             "identifierLocator",
             ListProp(AnyURIProp()),
-            json_name="https://rdf.spdx.org/v3/Core/identifierLocator",
+            iri="https://rdf.spdx.org/v3/Core/identifierLocator",
+        )
+        # An entity that is authorized to issue identification credentials.
+        self._add_property(
+            "issuingAuthority",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Core/issuingAuthority",
         )
         self._set_init_props(**kwargs)
 
@@ -2384,33 +3155,34 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ExternalIdentifier"] = E
 # A map of Element identifiers that are used within a Document but defined external to that Document.
 class ExternalMap(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/ExternalMap"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Provides an IntegrityMethod with which the integrity of an Element can be asserted.
-        self._add_property(
-            "verifiedUsing",
-            ListProp(ObjectProp(IntegrityMethod, False)),
-            json_name="https://rdf.spdx.org/v3/Core/verifiedUsing",
-        )
-        # Provides an indication of where to retrieve an external Element.
-        self._add_property(
-            "locationHint",
-            AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Core/locationHint",
-        )
         # Artifact representing a serialization instance of SPDX data containing the definition of a particular Element.
         self._add_property(
             "definingArtifact",
             ObjectProp(Artifact, False),
-            json_name="https://rdf.spdx.org/v3/Core/definingArtifact",
+            iri="https://rdf.spdx.org/v3/Core/definingArtifact",
         )
         # Identifies an external Element used within a Document but defined external to that Document.
         self._add_property(
             "externalSpdxId",
             AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Core/externalSpdxId",
+            iri="https://rdf.spdx.org/v3/Core/externalSpdxId",
             min_count=1,
+        )
+        # Provides an indication of where to retrieve an external Element.
+        self._add_property(
+            "locationHint",
+            AnyURIProp(),
+            iri="https://rdf.spdx.org/v3/Core/locationHint",
+        )
+        # Provides an IntegrityMethod with which the integrity of an Element can be asserted.
+        self._add_property(
+            "verifiedUsing",
+            ListProp(ObjectProp(IntegrityMethod, False)),
+            iri="https://rdf.spdx.org/v3/Core/verifiedUsing",
         )
         self._set_init_props(**kwargs)
 
@@ -2421,6 +3193,7 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ExternalMap"] = External
 # A reference to a resource outside the scope of SPDX-3.0 content.
 class ExternalRef(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/ExternalRef"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2428,25 +3201,25 @@ class ExternalRef(SHACLObject):
         self._add_property(
             "comment",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/comment",
-        )
-        # Provides the location of an external reference.
-        self._add_property(
-            "locator",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Core/locator",
+            iri="https://rdf.spdx.org/v3/Core/comment",
         )
         # Specifies the media type of an Element or Property.
         self._add_property(
             "contentType",
-            MediaTypeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/contentType",
+            StringProp(pattern=r"^[^\/]+\/[^\/]+$",),
+            iri="https://rdf.spdx.org/v3/Core/contentType",
         )
         # Specifies the type of the external reference.
         self._add_property(
             "externalRefType",
             ExternalRefType(),
-            json_name="https://rdf.spdx.org/v3/Core/externalRefType",
+            iri="https://rdf.spdx.org/v3/Core/externalRefType",
+        )
+        # Provides the location of an external reference.
+        self._add_property(
+            "locator",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/Core/locator",
         )
         self._set_init_props(**kwargs)
 
@@ -2457,6 +3230,7 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ExternalRef"] = External
 # Provides an independently reproducible mechanism that permits verification of a specific Element.
 class IntegrityMethod(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/IntegrityMethod"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2464,7 +3238,7 @@ class IntegrityMethod(SHACLObject):
         self._add_property(
             "comment",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/comment",
+            iri="https://rdf.spdx.org/v3/Core/comment",
         )
         self._set_init_props(**kwargs)
 
@@ -2475,21 +3249,22 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/IntegrityMethod"] = Inte
 # A mapping between prefixes and namespace partial URIs.
 class NamespaceMap(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/NamespaceMap"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
-        # A substitute for a URI.
-        self._add_property(
-            "prefix",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/prefix",
-            min_count=1,
-        )
         # Provides an unambiguous mechanism for conveying a URI fragment portion of an ElementID.
         self._add_property(
             "namespace",
             AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Core/namespace",
+            iri="https://rdf.spdx.org/v3/Core/namespace",
+            min_count=1,
+        )
+        # A substitute for a URI.
+        self._add_property(
+            "prefix",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Core/prefix",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -2501,21 +3276,22 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/NamespaceMap"] = Namespa
 # An SPDX version 2.X compatible verification method for software packages.
 class PackageVerificationCode(IntegrityMethod):
     TYPE = "https://rdf.spdx.org/v3/Core/PackageVerificationCode"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
-        # The relative file name of a file to be excluded from the `PackageVerificationCode`.
-        self._add_property(
-            "packageVerificationCodeExcludedFile",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Core/packageVerificationCodeExcludedFile",
-        )
         # The result of applying a hash algorithm to an Element.
         self._add_property(
             "hashValue",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/hashValue",
+            iri="https://rdf.spdx.org/v3/Core/hashValue",
             min_count=1,
+        )
+        # The relative file name of a file to be excluded from the `PackageVerificationCode`.
+        self._add_property(
+            "packageVerificationCodeExcludedFile",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/Core/packageVerificationCodeExcludedFile",
         )
         self._set_init_props(**kwargs)
 
@@ -2526,6 +3302,7 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/PackageVerificationCode"
 # A tuple of two positive integers that define a range.
 class PositiveIntegerRange(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Core/PositiveIntegerRange"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2533,14 +3310,14 @@ class PositiveIntegerRange(SHACLObject):
         self._add_property(
             "beginIntegerRange",
             PositiveIntegerProp(),
-            json_name="https://rdf.spdx.org/v3/Core/beginIntegerRange",
+            iri="https://rdf.spdx.org/v3/Core/beginIntegerRange",
             min_count=1,
         )
         # Defines the end of a range.
         self._add_property(
             "endIntegerRange",
             PositiveIntegerProp(),
-            json_name="https://rdf.spdx.org/v3/Core/endIntegerRange",
+            iri="https://rdf.spdx.org/v3/Core/endIntegerRange",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -2552,46 +3329,48 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/PositiveIntegerRange"] =
 # Describes a relationship between one or more elements.
 class Relationship(Element):
     TYPE = "https://rdf.spdx.org/v3/Core/Relationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
+        # Provides information about the completeness of relationships.
+        self._add_property(
+            "completeness",
+            RelationshipCompleteness(),
+            iri="https://rdf.spdx.org/v3/Core/completeness",
+        )
         # Specifies the time from which an element is no longer applicable / valid.
         self._add_property(
             "endTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/endTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Core/endTime",
         )
         # References the Element on the left-hand side of a relationship.
         self._add_property(
             "from_",
             ObjectProp(Element, True),
-            json_name="https://rdf.spdx.org/v3/Core/from",
+            iri="https://rdf.spdx.org/v3/Core/from",
             min_count=1,
         )
         # Information about the relationship between two Elements.
         self._add_property(
             "relationshipType",
             RelationshipType(),
-            json_name="https://rdf.spdx.org/v3/Core/relationshipType",
+            iri="https://rdf.spdx.org/v3/Core/relationshipType",
             min_count=1,
+        )
+        # Specifies the time from which an element is applicable / valid.
+        self._add_property(
+            "startTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Core/startTime",
         )
         # References an Element on the right-hand side of a relationship.
         self._add_property(
             "to",
             ListProp(ObjectProp(Element, False)),
-            json_name="https://rdf.spdx.org/v3/Core/to",
-        )
-        # Specifies the time from which an element is applicable / valid.
-        self._add_property(
-            "startTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/startTime",
-        )
-        # Provides information about the completeness of relationships.
-        self._add_property(
-            "completeness",
-            RelationshipCompleteness(),
-            json_name="https://rdf.spdx.org/v3/Core/completeness",
+            iri="https://rdf.spdx.org/v3/Core/to",
         )
         self._set_init_props(**kwargs)
 
@@ -2602,6 +3381,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Relationship"] = Relatio
 # A collection of SPDX Elements that could potentially be serialized.
 class SpdxDocument(ElementCollection):
     TYPE = "https://rdf.spdx.org/v3/Core/SpdxDocument"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2609,19 +3390,19 @@ class SpdxDocument(ElementCollection):
         self._add_property(
             "dataLicense",
             ObjectProp(simplelicensing_AnyLicenseInfo, False),
-            json_name="https://rdf.spdx.org/v3/Core/dataLicense",
-        )
-        # Provides a NamespaceMap of prefixes and associated namespace partial URIs applicable to an SpdxDocument and independent of any specific serialization format or instance.
-        self._add_property(
-            "namespaceMap",
-            ListProp(ObjectProp(NamespaceMap, False)),
-            json_name="https://rdf.spdx.org/v3/Core/namespaceMap",
+            iri="https://rdf.spdx.org/v3/Core/dataLicense",
         )
         # Provides an ExternalMap of Element identifiers.
         self._add_property(
             "imports",
             ListProp(ObjectProp(ExternalMap, False)),
-            json_name="https://rdf.spdx.org/v3/Core/imports",
+            iri="https://rdf.spdx.org/v3/Core/imports",
+        )
+        # Provides a NamespaceMap of prefixes and associated namespace partial URIs applicable to an SpdxDocument and independent of any specific serialization format or instance.
+        self._add_property(
+            "namespaceMap",
+            ListProp(ObjectProp(NamespaceMap, False)),
+            iri="https://rdf.spdx.org/v3/Core/namespaceMap",
         )
         self._set_init_props(**kwargs)
 
@@ -2632,6 +3413,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/SpdxDocument"] = SpdxDoc
 # An element of hardware and/or software utilized to carry out a particular function.
 class Tool(Element):
     TYPE = "https://rdf.spdx.org/v3/Core/Tool"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2645,46 +3428,48 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Tool"] = Tool
 # which is not itself a standalone License.
 class expandedlicensing_LicenseAddition(Element):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/LicenseAddition"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies whether an additional text identifier has been marked as deprecated.
-        self._add_property(
-            "expandedlicensing_isDeprecatedAdditionId",
-            BooleanProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedAdditionId",
-        )
-        # Contains a URL where the License or LicenseAddition can be found in use.
-        self._add_property(
-            "expandedlicensing_seeAlso",
-            ListProp(AnyURIProp()),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
-        )
         # Identifies the full text of a LicenseAddition.
         self._add_property(
             "expandedlicensing_additionText",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/additionText",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/additionText",
             min_count=1,
+        )
+        # Specifies whether an additional text identifier has been marked as deprecated.
+        self._add_property(
+            "expandedlicensing_isDeprecatedAdditionId",
+            BooleanProp(),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedAdditionId",
+        )
+        # Identifies all the text and metadata associated with a license in the license XML format.
+        self._add_property(
+            "expandedlicensing_licenseXml",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
         )
         # Specifies the licenseId that is preferred to be used in place of a deprecated
         # License or LicenseAddition.
         self._add_property(
             "expandedlicensing_obsoletedBy",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
+        )
+        # Contains a URL where the License or LicenseAddition can be found in use.
+        self._add_property(
+            "expandedlicensing_seeAlso",
+            ListProp(AnyURIProp()),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
         )
         # Identifies the full text of a LicenseAddition, in SPDX templating format.
         self._add_property(
             "expandedlicensing_standardAdditionTemplate",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/standardAdditionTemplate",
-        )
-        # Identifies all the text and metadata associated with a license in the license XML format.
-        self._add_property(
-            "expandedlicensing_licenseXml",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/standardAdditionTemplate",
         )
         self._set_init_props(**kwargs)
 
@@ -2695,6 +3480,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/LicenseAddi
 # A license exception that is listed on the SPDX Exceptions list.
 class expandedlicensing_ListedLicenseException(expandedlicensing_LicenseAddition):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicenseException"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2703,14 +3490,14 @@ class expandedlicensing_ListedLicenseException(expandedlicensing_LicenseAddition
         self._add_property(
             "expandedlicensing_deprecatedVersion",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
         )
         # Specifies the SPDX License List version in which this ListedLicense or
         # ListedLicenseException identifier was first added.
         self._add_property(
             "expandedlicensing_listVersionAdded",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
         )
         self._set_init_props(**kwargs)
 
@@ -2721,6 +3508,7 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicen
 # A characterization of some aspect of an Element that is associated with the Element in a generalized fashion.
 class extension_Extension(SHACLObject):
     TYPE = "https://rdf.spdx.org/v3/Extension/Extension"
+    REFABLE = Refable.optional
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2733,39 +3521,41 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Extension/Extension"] = exten
 # Abstract ancestor class for all vulnerability assessments
 class security_VulnAssessmentRelationship(Relationship):
     TYPE = "https://rdf.spdx.org/v3/Security/VulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies the time when a vulnerability was published.
-        self._add_property(
-            "security_publishedTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/publishedTime",
-        )
         # Identifies who or what supplied the artifact or VulnAssessmentRelationship referenced by the Element.
         self._add_property(
             "suppliedBy",
             ObjectProp(Agent, False),
-            json_name="https://rdf.spdx.org/v3/Core/suppliedBy",
-        )
-        # Specifies a time when a vulnerability assessment was modified
-        self._add_property(
-            "security_modifiedTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/modifiedTime",
-        )
-        # Specified the time and date when a vulnerability was withdrawn.
-        self._add_property(
-            "security_withdrawnTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/withdrawnTime",
+            iri="https://rdf.spdx.org/v3/Core/suppliedBy",
         )
         # Specifies an element contained in a piece of software where a vulnerability was
         # found.
         self._add_property(
             "security_assessedElement",
             ObjectProp(Element, False),
-            json_name="https://rdf.spdx.org/v3/Security/assessedElement",
+            iri="https://rdf.spdx.org/v3/Security/assessedElement",
+        )
+        # Specifies a time when a vulnerability assessment was modified
+        self._add_property(
+            "security_modifiedTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/modifiedTime",
+        )
+        # Specifies the time when a vulnerability was published.
+        self._add_property(
+            "security_publishedTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/publishedTime",
+        )
+        # Specified the time and date when a vulnerability was withdrawn.
+        self._add_property(
+            "security_withdrawnTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/withdrawnTime",
         )
         self._set_init_props(**kwargs)
 
@@ -2778,6 +3568,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VulnAssessmentRelati
 # according to the SPDX license expression syntax.
 class simplelicensing_AnyLicenseInfo(Element):
     TYPE = "https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2790,27 +3582,29 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInf
 # An SPDX Element containing an SPDX license expression string.
 class simplelicensing_LicenseExpression(simplelicensing_AnyLicenseInfo):
     TYPE = "https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # The version of the SPDX License List used in the license expression.
-        self._add_property(
-            "simplelicensing_licenseListVersion",
-            SemVerProp(),
-            json_name="https://rdf.spdx.org/v3/SimpleLicensing/licenseListVersion",
-        )
         # Maps a LicenseRef or AdditionRef string for a Custom License or a Custom License Addition to its URI ID.
         self._add_property(
             "simplelicensing_customIdToUri",
             ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/SimpleLicensing/customIdToUri",
+            iri="https://rdf.spdx.org/v3/SimpleLicensing/customIdToUri",
         )
         # A string in the license expression format.
         self._add_property(
             "simplelicensing_licenseExpression",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/SimpleLicensing/licenseExpression",
+            iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseExpression",
             min_count=1,
+        )
+        # The version of the SPDX License List used in the license expression.
+        self._add_property(
+            "simplelicensing_licenseListVersion",
+            StringProp(pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",),
+            iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseListVersion",
         )
         self._set_init_props(**kwargs)
 
@@ -2821,6 +3615,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpres
 # A license or addition that is not listed on the SPDX License List.
 class simplelicensing_SimpleLicensingText(Element):
     TYPE = "https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensingText"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2828,7 +3624,7 @@ class simplelicensing_SimpleLicensingText(Element):
         self._add_property(
             "simplelicensing_licenseText",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
+            iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -2840,63 +3636,65 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensi
 # Class that describes a build instance of software/artifacts.
 class build_Build(Element):
     TYPE = "https://rdf.spdx.org/v3/Build/Build"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Property describing the session in which a build is invoked.
+        # Property that describes the time at which a build stops.
         self._add_property(
-            "build_environment",
-            ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/Build/environment",
-        )
-        # Property that describes the URI of the build configuration source file.
-        self._add_property(
-            "build_configSourceUri",
-            ListProp(AnyURIProp()),
-            json_name="https://rdf.spdx.org/v3/Build/configSourceUri",
+            "build_buildEndTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Build/buildEndTime",
         )
         # A buildId is a locally unique identifier used by a builder to identify a unique instance of a build produced by it.
         self._add_property(
             "build_buildId",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Build/buildId",
+            iri="https://rdf.spdx.org/v3/Build/buildId",
         )
-        # Property that describes the digest of the build configuration file used to invoke a build.
+        # Property describing the start time of a build.
         self._add_property(
-            "build_configSourceDigest",
-            ListProp(ObjectProp(Hash, False)),
-            json_name="https://rdf.spdx.org/v3/Build/configSourceDigest",
-        )
-        # Property that describes the time at which a build stops.
-        self._add_property(
-            "build_buildEndTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Build/buildEndTime",
-        )
-        # Property describes the invocation entrypoint of a build.
-        self._add_property(
-            "build_configSourceEntrypoint",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Build/configSourceEntrypoint",
+            "build_buildStartTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Build/buildStartTime",
         )
         # A buildType is a hint that is used to indicate the toolchain, platform, or infrastructure that the build was invoked on.
         self._add_property(
             "build_buildType",
             AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Build/buildType",
+            iri="https://rdf.spdx.org/v3/Build/buildType",
             min_count=1,
+        )
+        # Property that describes the digest of the build configuration file used to invoke a build.
+        self._add_property(
+            "build_configSourceDigest",
+            ListProp(ObjectProp(Hash, False)),
+            iri="https://rdf.spdx.org/v3/Build/configSourceDigest",
+        )
+        # Property describes the invocation entrypoint of a build.
+        self._add_property(
+            "build_configSourceEntrypoint",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/Build/configSourceEntrypoint",
+        )
+        # Property that describes the URI of the build configuration source file.
+        self._add_property(
+            "build_configSourceUri",
+            ListProp(AnyURIProp()),
+            iri="https://rdf.spdx.org/v3/Build/configSourceUri",
+        )
+        # Property describing the session in which a build is invoked.
+        self._add_property(
+            "build_environment",
+            ListProp(ObjectProp(DictionaryEntry, False)),
+            iri="https://rdf.spdx.org/v3/Build/environment",
         )
         # Property describing the parameters used in an instance of a build.
         self._add_property(
             "build_parameters",
             ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/Build/parameters",
-        )
-        # Property describing the start time of a build.
-        self._add_property(
-            "build_buildStartTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Build/buildStartTime",
+            iri="https://rdf.spdx.org/v3/Build/parameters",
         )
         self._set_init_props(**kwargs)
 
@@ -2907,6 +3705,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Build/Build"] = build_Build
 # Agent represents anything with the potential to act on a system.
 class Agent(Element):
     TYPE = "https://rdf.spdx.org/v3/Core/Agent"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -2919,33 +3719,35 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Agent"] = Agent
 # An assertion made in relation to one or more elements.
 class Annotation(Element):
     TYPE = "https://rdf.spdx.org/v3/Core/Annotation"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Commentary on an assertion that an annotator has made.
-        self._add_property(
-            "statement",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/statement",
-        )
         # Describes the type of annotation.
         self._add_property(
             "annotationType",
             AnnotationType(),
-            json_name="https://rdf.spdx.org/v3/Core/annotationType",
+            iri="https://rdf.spdx.org/v3/Core/annotationType",
             min_count=1,
         )
         # Specifies the media type of an Element or Property.
         self._add_property(
             "contentType",
-            MediaTypeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/contentType",
+            StringProp(pattern=r"^[^\/]+\/[^\/]+$",),
+            iri="https://rdf.spdx.org/v3/Core/contentType",
+        )
+        # Commentary on an assertion that an annotator has made.
+        self._add_property(
+            "statement",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Core/statement",
         )
         # An Element an annotator has made an assertion about.
         self._add_property(
             "subject",
             ObjectProp(Element, True),
-            json_name="https://rdf.spdx.org/v3/Core/subject",
+            iri="https://rdf.spdx.org/v3/Core/subject",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -2957,50 +3759,52 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Annotation"] = Annotatio
 # A distinct article or unit within the digital domain.
 class Artifact(Element):
     TYPE = "https://rdf.spdx.org/v3/Core/Artifact"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies until when the artifact can be used before its usage needs to be reassessed.
-        self._add_property(
-            "validUntilTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/validUntilTime",
-        )
         # Specifies the time an artifact was built.
         self._add_property(
             "builtTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/builtTime",
-        )
-        # The name of a relevant standard that may apply to an artifact.
-        self._add_property(
-            "standardName",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Core/standardName",
-        )
-        # Specifies the time an artifact was released.
-        self._add_property(
-            "releaseTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Core/releaseTime",
-        )
-        # Identifies who or what supplied the artifact or VulnAssessmentRelationship referenced by the Element.
-        self._add_property(
-            "suppliedBy",
-            ObjectProp(Agent, False),
-            json_name="https://rdf.spdx.org/v3/Core/suppliedBy",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Core/builtTime",
         )
         # Identifies from where or whom the Element originally came.
         self._add_property(
             "originatedBy",
             ListProp(ObjectProp(Agent, False)),
-            json_name="https://rdf.spdx.org/v3/Core/originatedBy",
+            iri="https://rdf.spdx.org/v3/Core/originatedBy",
+        )
+        # Specifies the time an artifact was released.
+        self._add_property(
+            "releaseTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Core/releaseTime",
+        )
+        # The name of a relevant standard that may apply to an artifact.
+        self._add_property(
+            "standardName",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/Core/standardName",
+        )
+        # Identifies who or what supplied the artifact or VulnAssessmentRelationship referenced by the Element.
+        self._add_property(
+            "suppliedBy",
+            ObjectProp(Agent, False),
+            iri="https://rdf.spdx.org/v3/Core/suppliedBy",
         )
         # Specifies the level of support associated with an artifact.
         self._add_property(
             "supportLevel",
             ListProp(SupportType()),
-            json_name="https://rdf.spdx.org/v3/Core/supportLevel",
+            iri="https://rdf.spdx.org/v3/Core/supportLevel",
+        )
+        # Specifies until when the artifact can be used before its usage needs to be reassessed.
+        self._add_property(
+            "validUntilTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Core/validUntilTime",
         )
         self._set_init_props(**kwargs)
 
@@ -3011,6 +3815,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Artifact"] = Artifact
 # A collection of Elements that have a shared context.
 class Bundle(ElementCollection):
     TYPE = "https://rdf.spdx.org/v3/Core/Bundle"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3019,7 +3825,7 @@ class Bundle(ElementCollection):
         self._add_property(
             "context",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/context",
+            iri="https://rdf.spdx.org/v3/Core/context",
         )
         self._set_init_props(**kwargs)
 
@@ -3030,21 +3836,22 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Bundle"] = Bundle
 # A mathematically calculated representation of a grouping of data.
 class Hash(IntegrityMethod):
     TYPE = "https://rdf.spdx.org/v3/Core/Hash"
+    REFABLE = Refable.no
 
     def __init__(self, **kwargs):
         super().__init__()
-        # The result of applying a hash algorithm to an Element.
-        self._add_property(
-            "hashValue",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Core/hashValue",
-            min_count=1,
-        )
         # Specifies the algorithm used for calculating the hash value.
         self._add_property(
             "algorithm",
             HashAlgorithm(),
-            json_name="https://rdf.spdx.org/v3/Core/algorithm",
+            iri="https://rdf.spdx.org/v3/Core/algorithm",
+            min_count=1,
+        )
+        # The result of applying a hash algorithm to an Element.
+        self._add_property(
+            "hashValue",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Core/hashValue",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3056,6 +3863,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Hash"] = Hash
 # Provide context for a relationship that occurs in the software lifecycle.
 class LifecycleScopedRelationship(Relationship):
     TYPE = "https://rdf.spdx.org/v3/Core/LifecycleScopedRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3063,7 +3872,7 @@ class LifecycleScopedRelationship(Relationship):
         self._add_property(
             "scope",
             LifecycleScopeType(),
-            json_name="https://rdf.spdx.org/v3/Core/scope",
+            iri="https://rdf.spdx.org/v3/Core/scope",
         )
         self._set_init_props(**kwargs)
 
@@ -3074,6 +3883,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/LifecycleScopedRelations
 # A group of people who work together in an organized way for a shared purpose.
 class Organization(Agent):
     TYPE = "https://rdf.spdx.org/v3/Core/Organization"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3086,6 +3897,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Organization"] = Organiz
 # An individual human being.
 class Person(Agent):
     TYPE = "https://rdf.spdx.org/v3/Core/Person"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3098,6 +3911,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Person"] = Person
 # A software agent.
 class SoftwareAgent(Agent):
     TYPE = "https://rdf.spdx.org/v3/Core/SoftwareAgent"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3111,6 +3926,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/SoftwareAgent"] = Softwa
 # where all elements apply.
 class expandedlicensing_ConjunctiveLicenseSet(simplelicensing_AnyLicenseInfo):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3118,7 +3935,7 @@ class expandedlicensing_ConjunctiveLicenseSet(simplelicensing_AnyLicenseInfo):
         self._add_property(
             "expandedlicensing_member",
             ListProp(ObjectProp(simplelicensing_AnyLicenseInfo, False)),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/member",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/member",
             min_count=2,
         )
         self._set_init_props(**kwargs)
@@ -3130,6 +3947,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/Conjunctive
 # A license addition that is not listed on the SPDX Exceptions List.
 class expandedlicensing_CustomLicenseAddition(expandedlicensing_LicenseAddition):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicenseAddition"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3143,6 +3962,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicen
 # where only any one of the elements applies.
 class expandedlicensing_DisjunctiveLicenseSet(simplelicensing_AnyLicenseInfo):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/DisjunctiveLicenseSet"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3150,7 +3971,7 @@ class expandedlicensing_DisjunctiveLicenseSet(simplelicensing_AnyLicenseInfo):
         self._add_property(
             "expandedlicensing_member",
             ListProp(ObjectProp(simplelicensing_AnyLicenseInfo, False)),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/member",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/member",
             min_count=2,
         )
         self._set_init_props(**kwargs)
@@ -3162,6 +3983,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/Disjunctive
 # Abstract class representing a License or an OrLaterOperator.
 class expandedlicensing_ExtendableLicense(simplelicensing_AnyLicenseInfo):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ExtendableLicense"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3174,6 +3997,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ExtendableL
 # A concrete subclass of AnyLicenseInfo used by Individuals in the ExpandedLicensing profile.
 class expandedlicensing_IndividualLicensingInfo(simplelicensing_AnyLicenseInfo):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/IndividualLicensingInfo"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3186,68 +4011,70 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/IndividualL
 # Abstract class for the portion of an AnyLicenseInfo representing a license.
 class expandedlicensing_License(expandedlicensing_ExtendableLicense):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/License"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Identifies the full text of a License, in SPDX templating format.
+        # Specifies whether a license or additional text identifier has been marked as
+        # deprecated.
         self._add_property(
-            "expandedlicensing_standardLicenseTemplate",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseTemplate",
-        )
-        # Provides a License author's preferred text to indicate that a file is covered
-        # by the License.
-        self._add_property(
-            "expandedlicensing_standardLicenseHeader",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseHeader",
+            "expandedlicensing_isDeprecatedLicenseId",
+            BooleanProp(),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedLicenseId",
         )
         # Specifies whether the License is listed as free by the
         # [Free Software Foundation (FSF)](https://fsf.org).
         self._add_property(
             "expandedlicensing_isFsfLibre",
             BooleanProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/isFsfLibre",
-        )
-        # Identifies the full text of a License or Addition.
-        self._add_property(
-            "simplelicensing_licenseText",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
-            min_count=1,
-        )
-        # Contains a URL where the License or LicenseAddition can be found in use.
-        self._add_property(
-            "expandedlicensing_seeAlso",
-            ListProp(AnyURIProp()),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/isFsfLibre",
         )
         # Specifies whether the License is listed as approved by the
         # [Open Source Initiative (OSI)](https://opensource.org).
         self._add_property(
             "expandedlicensing_isOsiApproved",
             BooleanProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/isOsiApproved",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/isOsiApproved",
+        )
+        # Identifies all the text and metadata associated with a license in the license XML format.
+        self._add_property(
+            "expandedlicensing_licenseXml",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
         )
         # Specifies the licenseId that is preferred to be used in place of a deprecated
         # License or LicenseAddition.
         self._add_property(
             "expandedlicensing_obsoletedBy",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
         )
-        # Specifies whether a license or additional text identifier has been marked as
-        # deprecated.
+        # Contains a URL where the License or LicenseAddition can be found in use.
         self._add_property(
-            "expandedlicensing_isDeprecatedLicenseId",
-            BooleanProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedLicenseId",
+            "expandedlicensing_seeAlso",
+            ListProp(AnyURIProp()),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
         )
-        # Identifies all the text and metadata associated with a license in the license XML format.
+        # Provides a License author's preferred text to indicate that a file is covered
+        # by the License.
         self._add_property(
-            "expandedlicensing_licenseXml",
+            "expandedlicensing_standardLicenseHeader",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseHeader",
+        )
+        # Identifies the full text of a License, in SPDX templating format.
+        self._add_property(
+            "expandedlicensing_standardLicenseTemplate",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseTemplate",
+        )
+        # Identifies the full text of a License or Addition.
+        self._add_property(
+            "simplelicensing_licenseText",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
+            min_count=1,
         )
         self._set_init_props(**kwargs)
 
@@ -3258,22 +4085,24 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/License"] =
 # A license that is listed on the SPDX License List.
 class expandedlicensing_ListedLicense(expandedlicensing_License):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicense"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies the SPDX License List version in which this ListedLicense or
-        # ListedLicenseException identifier was first added.
-        self._add_property(
-            "expandedlicensing_listVersionAdded",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
-        )
         # Specifies the SPDX License List version in which this license or exception
         # identifier was deprecated.
         self._add_property(
             "expandedlicensing_deprecatedVersion",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
+        )
+        # Specifies the SPDX License List version in which this ListedLicense or
+        # ListedLicenseException identifier was first added.
+        self._add_property(
+            "expandedlicensing_listVersionAdded",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
         )
         self._set_init_props(**kwargs)
 
@@ -3285,6 +4114,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicen
 # of the indicated License.
 class expandedlicensing_OrLaterOperator(expandedlicensing_ExtendableLicense):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOperator"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3292,7 +4123,7 @@ class expandedlicensing_OrLaterOperator(expandedlicensing_ExtendableLicense):
         self._add_property(
             "expandedlicensing_subjectLicense",
             ObjectProp(expandedlicensing_License, True),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/subjectLicense",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/subjectLicense",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3305,6 +4136,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOper
 # text applied to it.
 class expandedlicensing_WithAdditionOperator(simplelicensing_AnyLicenseInfo):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditionOperator"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3312,14 +4145,14 @@ class expandedlicensing_WithAdditionOperator(simplelicensing_AnyLicenseInfo):
         self._add_property(
             "expandedlicensing_subjectAddition",
             ObjectProp(expandedlicensing_LicenseAddition, True),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/subjectAddition",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/subjectAddition",
             min_count=1,
         )
         # A License participating in a 'with addition' model.
         self._add_property(
             "expandedlicensing_subjectExtendableLicense",
             ObjectProp(expandedlicensing_ExtendableLicense, True),
-            json_name="https://rdf.spdx.org/v3/ExpandedLicensing/subjectExtendableLicense",
+            iri="https://rdf.spdx.org/v3/ExpandedLicensing/subjectExtendableLicense",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3331,6 +4164,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditio
 # Provides a CVSS version 2.0 assessment for a vulnerability.
 class security_CvssV2VulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/CvssV2VulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3338,14 +4173,14 @@ class security_CvssV2VulnAssessmentRelationship(security_VulnAssessmentRelations
         self._add_property(
             "security_score",
             FloatProp(),
-            json_name="https://rdf.spdx.org/v3/Security/score",
+            iri="https://rdf.spdx.org/v3/Security/score",
             min_count=1,
         )
         # Specifies the CVSS vector string for a vulnerability.
         self._add_property(
             "security_vectorString",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/vectorString",
+            iri="https://rdf.spdx.org/v3/Security/vectorString",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3357,28 +4192,30 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/CvssV2VulnAssessment
 # Provides a CVSS version 3 assessment for a vulnerability.
 class security_CvssV3VulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/CvssV3VulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies the CVSS vector string for a vulnerability.
-        self._add_property(
-            "security_vectorString",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/vectorString",
-            min_count=1,
-        )
         # Provides a numerical (0-10) representation of the severity of a vulnerability.
         self._add_property(
             "security_score",
             FloatProp(),
-            json_name="https://rdf.spdx.org/v3/Security/score",
+            iri="https://rdf.spdx.org/v3/Security/score",
             min_count=1,
         )
         # Specifies the CVSS qualitative severity rating of a vulnerability in relation to a piece of software.
         self._add_property(
             "security_severity",
             security_CvssSeverityType(),
-            json_name="https://rdf.spdx.org/v3/Security/severity",
+            iri="https://rdf.spdx.org/v3/Security/severity",
+            min_count=1,
+        )
+        # Specifies the CVSS vector string for a vulnerability.
+        self._add_property(
+            "security_vectorString",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Security/vectorString",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3390,6 +4227,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/CvssV3VulnAssessment
 # Provides a CVSS version 4 assessment for a vulnerability.
 class security_CvssV4VulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/CvssV4VulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3397,21 +4236,21 @@ class security_CvssV4VulnAssessmentRelationship(security_VulnAssessmentRelations
         self._add_property(
             "security_score",
             FloatProp(),
-            json_name="https://rdf.spdx.org/v3/Security/score",
-            min_count=1,
-        )
-        # Specifies the CVSS vector string for a vulnerability.
-        self._add_property(
-            "security_vectorString",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/vectorString",
+            iri="https://rdf.spdx.org/v3/Security/score",
             min_count=1,
         )
         # Specifies the CVSS qualitative severity rating of a vulnerability in relation to a piece of software.
         self._add_property(
             "security_severity",
             security_CvssSeverityType(),
-            json_name="https://rdf.spdx.org/v3/Security/severity",
+            iri="https://rdf.spdx.org/v3/Security/severity",
+            min_count=1,
+        )
+        # Specifies the CVSS vector string for a vulnerability.
+        self._add_property(
+            "security_vectorString",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Security/vectorString",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3423,28 +4262,30 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/CvssV4VulnAssessment
 # Provides an EPSS assessment for a vulnerability.
 class security_EpssVulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/EpssVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies the time when a vulnerability was published.
-        self._add_property(
-            "security_publishedTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/publishedTime",
-            min_count=1,
-        )
         # The percentile of the current probability score.
         self._add_property(
             "security_percentile",
             FloatProp(),
-            json_name="https://rdf.spdx.org/v3/Security/percentile",
+            iri="https://rdf.spdx.org/v3/Security/percentile",
             min_count=1,
         )
         # A probability score between 0 and 1 of a vulnerability being exploited.
         self._add_property(
             "security_probability",
             FloatProp(),
-            json_name="https://rdf.spdx.org/v3/Security/probability",
+            iri="https://rdf.spdx.org/v3/Security/probability",
+            min_count=1,
+        )
+        # Specifies the time when a vulnerability was published.
+        self._add_property(
+            "security_publishedTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/publishedTime",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3456,28 +4297,30 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/EpssVulnAssessmentRe
 # Provides an exploit assessment of a vulnerability.
 class security_ExploitCatalogVulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/ExploitCatalogVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Provides the location of an exploit catalog.
-        self._add_property(
-            "security_locator",
-            AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Security/locator",
-            min_count=1,
-        )
         # Specifies the exploit catalog type.
         self._add_property(
             "security_catalogType",
             security_ExploitCatalogType(),
-            json_name="https://rdf.spdx.org/v3/Security/catalogType",
+            iri="https://rdf.spdx.org/v3/Security/catalogType",
             min_count=1,
         )
         # Describe that a CVE is known to have an exploit because it's been listed in an exploit catalog.
         self._add_property(
             "security_exploited",
             BooleanProp(),
-            json_name="https://rdf.spdx.org/v3/Security/exploited",
+            iri="https://rdf.spdx.org/v3/Security/exploited",
+            min_count=1,
+        )
+        # Provides the location of an exploit catalog.
+        self._add_property(
+            "security_locator",
+            AnyURIProp(),
+            iri="https://rdf.spdx.org/v3/Security/locator",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3489,6 +4332,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/ExploitCatalogVulnAs
 # Provides an SSVC assessment for a vulnerability.
 class security_SsvcVulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/SsvcVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3496,7 +4341,7 @@ class security_SsvcVulnAssessmentRelationship(security_VulnAssessmentRelationshi
         self._add_property(
             "security_decisionType",
             security_SsvcDecisionType(),
-            json_name="https://rdf.spdx.org/v3/Security/decisionType",
+            iri="https://rdf.spdx.org/v3/Security/decisionType",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3508,20 +4353,22 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/SsvcVulnAssessmentRe
 # Asbtract ancestor class for all VEX relationships
 class security_VexVulnAssessmentRelationship(security_VulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/VexVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies the version of the VEX document.
-        self._add_property(
-            "security_vexVersion",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/vexVersion",
-        )
         # Conveys information about how VEX status was determined.
         self._add_property(
             "security_statusNotes",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/statusNotes",
+            iri="https://rdf.spdx.org/v3/Security/statusNotes",
+        )
+        # Specifies the version of the VEX document.
+        self._add_property(
+            "security_vexVersion",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Security/vexVersion",
         )
         self._set_init_props(**kwargs)
 
@@ -3532,26 +4379,28 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexVulnAssessmentRel
 # Specifies a vulnerability and its associated information.
 class security_Vulnerability(Artifact):
     TYPE = "https://rdf.spdx.org/v3/Security/Vulnerability"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Specifies the time when a vulnerability was published.
-        self._add_property(
-            "security_publishedTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/publishedTime",
-        )
         # Specifies a time when a vulnerability assessment was modified
         self._add_property(
             "security_modifiedTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/modifiedTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/modifiedTime",
+        )
+        # Specifies the time when a vulnerability was published.
+        self._add_property(
+            "security_publishedTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/publishedTime",
         )
         # Specified the time and date when a vulnerability was withdrawn.
         self._add_property(
             "security_withdrawnTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/withdrawnTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/withdrawnTime",
         )
         self._set_init_props(**kwargs)
 
@@ -3562,41 +4411,43 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/Vulnerability"] = se
 # A distinct article or unit related to Software.
 class software_SoftwareArtifact(Artifact):
     TYPE = "https://rdf.spdx.org/v3/Software/SoftwareArtifact"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
+        # Provides additional purpose information of the software artifact.
+        self._add_property(
+            "software_additionalPurpose",
+            ListProp(software_SoftwarePurpose()),
+            iri="https://rdf.spdx.org/v3/Software/additionalPurpose",
+        )
         # Provides a place for the SPDX data creator to record acknowledgement text for
         # a software Package, File or Snippet.
         self._add_property(
             "software_attributionText",
             ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Software/attributionText",
-        )
-        # Provides information about the primary purpose of the software artifact.
-        self._add_property(
-            "software_primaryPurpose",
-            software_SoftwarePurpose(),
-            json_name="https://rdf.spdx.org/v3/Software/primaryPurpose",
-        )
-        # Provides additional purpose information of the software artifact.
-        self._add_property(
-            "software_additionalPurpose",
-            ListProp(software_SoftwarePurpose()),
-            json_name="https://rdf.spdx.org/v3/Software/additionalPurpose",
+            iri="https://rdf.spdx.org/v3/Software/attributionText",
         )
         # Identifies the text of one or more copyright notices for a software Package,
         # File or Snippet, if any.
         self._add_property(
             "software_copyrightText",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Software/copyrightText",
+            iri="https://rdf.spdx.org/v3/Software/copyrightText",
         )
         # Used to record the artifact’s gitoid: a canonical, unique, immutable identifier that can be used for software integrity verification.
         self._add_property(
             "software_gitoid",
             ListProp(AnyURIProp()),
-            json_name="https://rdf.spdx.org/v3/Software/gitoid",
+            iri="https://rdf.spdx.org/v3/Software/gitoid",
             max_count=2,
+        )
+        # Provides information about the primary purpose of the software artifact.
+        self._add_property(
+            "software_primaryPurpose",
+            software_SoftwarePurpose(),
+            iri="https://rdf.spdx.org/v3/Software/primaryPurpose",
         )
         self._set_init_props(**kwargs)
 
@@ -3608,6 +4459,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/SoftwareArtifact"] =
 # (provenence, composition, licensing, etc.) about a product.
 class Bom(Bundle):
     TYPE = "https://rdf.spdx.org/v3/Core/Bom"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3620,6 +4473,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Bom"] = Bom
 # A license that is not listed on the SPDX License List.
 class expandedlicensing_CustomLicense(expandedlicensing_License):
     TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3633,22 +4488,24 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicen
 # affected by the vulnerability.
 class security_VexAffectedVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/VexAffectedVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Records the time when a recommended action was communicated in a VEX statement
-        # to mitigate a vulnerability.
-        self._add_property(
-            "security_actionStatementTime",
-            ListProp(DateTimeProp()),
-            json_name="https://rdf.spdx.org/v3/Security/actionStatementTime",
-        )
         # Provides advise on how to mitigate or remediate a vulnerability when a VEX product
         # is affected by it.
         self._add_property(
             "security_actionStatement",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/actionStatement",
+            iri="https://rdf.spdx.org/v3/Security/actionStatement",
+        )
+        # Records the time when a recommended action was communicated in a VEX statement
+        # to mitigate a vulnerability.
+        self._add_property(
+            "security_actionStatementTime",
+            ListProp(DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",)),
+            iri="https://rdf.spdx.org/v3/Security/actionStatementTime",
         )
         self._set_init_props(**kwargs)
 
@@ -3660,6 +4517,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexAffectedVulnAsses
 # a fix has been applied and are no longer affected.
 class security_VexFixedVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/VexFixedVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3673,22 +4532,24 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexFixedVulnAssessme
 # not affected by the vulnerability.
 class security_VexNotAffectedVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/VexNotAffectedVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Timestamp of impact statement.
-        self._add_property(
-            "security_impactStatementTime",
-            DateTimeProp(),
-            json_name="https://rdf.spdx.org/v3/Security/impactStatementTime",
-        )
         # Explains why a VEX product is not affected by a vulnerability. It is an
         # alternative in VexNotAffectedVulnAssessmentRelationship to the machine-readable
         # justification label.
         self._add_property(
             "security_impactStatement",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Security/impactStatement",
+            iri="https://rdf.spdx.org/v3/Security/impactStatement",
+        )
+        # Timestamp of impact statement.
+        self._add_property(
+            "security_impactStatementTime",
+            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            iri="https://rdf.spdx.org/v3/Security/impactStatementTime",
         )
         # Impact justification label to be used when linking a vulnerability to an element
         # representing a VEX product with a VexNotAffectedVulnAssessmentRelationship
@@ -3696,7 +4557,7 @@ class security_VexNotAffectedVulnAssessmentRelationship(security_VexVulnAssessme
         self._add_property(
             "security_justificationType",
             security_VexJustificationType(),
-            json_name="https://rdf.spdx.org/v3/Security/justificationType",
+            iri="https://rdf.spdx.org/v3/Security/justificationType",
         )
         self._set_init_props(**kwargs)
 
@@ -3708,6 +4569,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexNotAffectedVulnAs
 # investigated.
 class security_VexUnderInvestigationVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
     TYPE = "https://rdf.spdx.org/v3/Security/VexUnderInvestigationVulnAssessmentRelationship"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3720,20 +4583,22 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexUnderInvestigatio
 # Refers to any object that stores content on a computer.
 class software_File(software_SoftwareArtifact):
     TYPE = "https://rdf.spdx.org/v3/Software/File"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
         # Provides information about the content type of an Element.
         self._add_property(
             "software_contentType",
-            MediaTypeProp(),
-            json_name="https://rdf.spdx.org/v3/Software/contentType",
+            StringProp(pattern=r"^[^\/]+\/[^\/]+$",),
+            iri="https://rdf.spdx.org/v3/Software/contentType",
         )
         # If true, denotes the Element is a directory.
         self._add_property(
             "software_isDirectory",
             BooleanProp(),
-            json_name="https://rdf.spdx.org/v3/Software/isDirectory",
+            iri="https://rdf.spdx.org/v3/Software/isDirectory",
         )
         self._set_init_props(**kwargs)
 
@@ -3744,39 +4609,41 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/File"] = software_Fi
 # Refers to any unit of content that can be associated with a distribution of software.
 class software_Package(software_SoftwareArtifact):
     TYPE = "https://rdf.spdx.org/v3/Software/Package"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Records any relevant background information or additional comments
-        # about the origin of the package.
+        # Identifies the download Uniform Resource Identifier for the package at the time that the document was created.
         self._add_property(
-            "software_sourceInfo",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Software/sourceInfo",
+            "software_downloadLocation",
+            AnyURIProp(),
+            iri="https://rdf.spdx.org/v3/Software/downloadLocation",
         )
         # A place for the SPDX document creator to record a website that serves as the package's home page.
         self._add_property(
             "software_homePage",
             AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Software/homePage",
-        )
-        # Identify the version of a package.
-        self._add_property(
-            "software_packageVersion",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Software/packageVersion",
-        )
-        # Identifies the download Uniform Resource Identifier for the package at the time that the document was created.
-        self._add_property(
-            "software_downloadLocation",
-            AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Software/downloadLocation",
+            iri="https://rdf.spdx.org/v3/Software/homePage",
         )
         # Provides a place for the SPDX data creator to record the package URL string (in accordance with the [package URL spec](https://github.com/package-url/purl-spec/blob/master/PURL-SPECIFICATION.rst)) for a software Package.
         self._add_property(
             "software_packageUrl",
             AnyURIProp(),
-            json_name="https://rdf.spdx.org/v3/Software/packageUrl",
+            iri="https://rdf.spdx.org/v3/Software/packageUrl",
+        )
+        # Identify the version of a package.
+        self._add_property(
+            "software_packageVersion",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Software/packageVersion",
+        )
+        # Records any relevant background information or additional comments
+        # about the origin of the package.
+        self._add_property(
+            "software_sourceInfo",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Software/sourceInfo",
         )
         self._set_init_props(**kwargs)
 
@@ -3787,6 +4654,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/Package"] = software
 # A collection of SPDX Elements describing a single package.
 class software_Sbom(Bom):
     TYPE = "https://rdf.spdx.org/v3/Software/Sbom"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3794,7 +4663,7 @@ class software_Sbom(Bom):
         self._add_property(
             "software_sbomType",
             ListProp(software_SbomType()),
-            json_name="https://rdf.spdx.org/v3/Software/sbomType",
+            iri="https://rdf.spdx.org/v3/Software/sbomType",
         )
         self._set_init_props(**kwargs)
 
@@ -3805,6 +4674,8 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/Sbom"] = software_Sb
 # Describes a certain part of a file.
 class software_Snippet(software_SoftwareArtifact):
     TYPE = "https://rdf.spdx.org/v3/Software/Snippet"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -3812,19 +4683,19 @@ class software_Snippet(software_SoftwareArtifact):
         self._add_property(
             "software_byteRange",
             ObjectProp(PositiveIntegerRange, False),
-            json_name="https://rdf.spdx.org/v3/Software/byteRange",
+            iri="https://rdf.spdx.org/v3/Software/byteRange",
         )
         # Defines the line range in the original host file that the snippet information applies to.
         self._add_property(
             "software_lineRange",
             ObjectProp(PositiveIntegerRange, False),
-            json_name="https://rdf.spdx.org/v3/Software/lineRange",
+            iri="https://rdf.spdx.org/v3/Software/lineRange",
         )
         # Defines the original host file that the snippet information applies to.
         self._add_property(
             "software_snippetFromFile",
             ObjectProp(software_File, True),
-            json_name="https://rdf.spdx.org/v3/Software/snippetFromFile",
+            iri="https://rdf.spdx.org/v3/Software/snippetFromFile",
             min_count=1,
         )
         self._set_init_props(**kwargs)
@@ -3836,98 +4707,100 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/Snippet"] = software
 # Provides information about the fields in the AI package profile.
 class ai_AIPackage(software_Package):
     TYPE = "https://rdf.spdx.org/v3/AI/AIPackage"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Captures a limitation of the AI software.
+        # States if a human is involved in the decisions of the AI software.
         self._add_property(
-            "ai_limitation",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/AI/limitation",
-        )
-        # Captures the threshold that was used for computation of a metric described in the metric field.
-        self._add_property(
-            "ai_metricDecisionThreshold",
-            ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/AI/metricDecisionThreshold",
+            "ai_autonomyType",
+            PresenceType(),
+            iri="https://rdf.spdx.org/v3/AI/autonomyType",
         )
         # Captures the domain in which the AI package can be used.
         self._add_property(
             "ai_domain",
             ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/AI/domain",
-        )
-        # Describes methods that can be used to explain the model.
-        self._add_property(
-            "ai_modelExplainability",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/AI/modelExplainability",
+            iri="https://rdf.spdx.org/v3/AI/domain",
         )
         # Indicates the amount of energy consumed to build the AI package.
         self._add_property(
             "ai_energyConsumption",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/AI/energyConsumption",
-        )
-        # Provides relevant information about the AI software, not including the model description.
-        self._add_property(
-            "ai_informationAboutApplication",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/AI/informationAboutApplication",
-        )
-        # Records if sensitive personal information is used during model training.
-        self._add_property(
-            "ai_sensitivePersonalInformation",
-            PresenceType(),
-            json_name="https://rdf.spdx.org/v3/AI/sensitivePersonalInformation",
-        )
-        # Describes all the preprocessing steps applied to the training data before the model training.
-        self._add_property(
-            "ai_modelDataPreprocessing",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/AI/modelDataPreprocessing",
-        )
-        # Records the measurement of prediction quality of the AI model.
-        self._add_property(
-            "ai_metric",
-            ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/AI/metric",
-        )
-        # Describes relevant information about different steps of the training process.
-        self._add_property(
-            "ai_informationAboutTraining",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/AI/informationAboutTraining",
+            iri="https://rdf.spdx.org/v3/AI/energyConsumption",
         )
         # Records a hyperparameter used to build the AI model contained in the AI package.
         self._add_property(
             "ai_hyperparameter",
             ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/AI/hyperparameter",
+            iri="https://rdf.spdx.org/v3/AI/hyperparameter",
         )
-        # Captures a standard that is being complied with.
+        # Provides relevant information about the AI software, not including the model description.
         self._add_property(
-            "ai_standardCompliance",
+            "ai_informationAboutApplication",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/AI/informationAboutApplication",
+        )
+        # Describes relevant information about different steps of the training process.
+        self._add_property(
+            "ai_informationAboutTraining",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/AI/informationAboutTraining",
+        )
+        # Captures a limitation of the AI software.
+        self._add_property(
+            "ai_limitation",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/AI/limitation",
+        )
+        # Records the measurement of prediction quality of the AI model.
+        self._add_property(
+            "ai_metric",
+            ListProp(ObjectProp(DictionaryEntry, False)),
+            iri="https://rdf.spdx.org/v3/AI/metric",
+        )
+        # Captures the threshold that was used for computation of a metric described in the metric field.
+        self._add_property(
+            "ai_metricDecisionThreshold",
+            ListProp(ObjectProp(DictionaryEntry, False)),
+            iri="https://rdf.spdx.org/v3/AI/metricDecisionThreshold",
+        )
+        # Describes all the preprocessing steps applied to the training data before the model training.
+        self._add_property(
+            "ai_modelDataPreprocessing",
             ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/AI/standardCompliance",
+            iri="https://rdf.spdx.org/v3/AI/modelDataPreprocessing",
         )
-        # Records the type of the model used in the AI software.
+        # Describes methods that can be used to explain the model.
         self._add_property(
-            "ai_typeOfModel",
+            "ai_modelExplainability",
             ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/AI/typeOfModel",
-        )
-        # States if a human is involved in the decisions of the AI software.
-        self._add_property(
-            "ai_autonomyType",
-            PresenceType(),
-            json_name="https://rdf.spdx.org/v3/AI/autonomyType",
+            iri="https://rdf.spdx.org/v3/AI/modelExplainability",
         )
         # Categorizes safety risk impact of AI software.
         self._add_property(
             "ai_safetyRiskAssessment",
             ai_SafetyRiskAssessmentType(),
-            json_name="https://rdf.spdx.org/v3/AI/safetyRiskAssessment",
+            iri="https://rdf.spdx.org/v3/AI/safetyRiskAssessment",
+        )
+        # Records if sensitive personal information is used during model training.
+        self._add_property(
+            "ai_sensitivePersonalInformation",
+            PresenceType(),
+            iri="https://rdf.spdx.org/v3/AI/sensitivePersonalInformation",
+        )
+        # Captures a standard that is being complied with.
+        self._add_property(
+            "ai_standardCompliance",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/AI/standardCompliance",
+        )
+        # Records the type of the model used in the AI software.
+        self._add_property(
+            "ai_typeOfModel",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/AI/typeOfModel",
         )
         self._set_init_props(**kwargs)
 
@@ -3938,87 +4811,89 @@ SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/AI/AIPackage"] = ai_AIPackage
 # Provides information about the fields in the Dataset profile.
 class dataset_Dataset(software_Package):
     TYPE = "https://rdf.spdx.org/v3/Dataset/Dataset"
+    REFABLE = Refable.yes
+    ID_ALIAS = "spdxId"
 
     def __init__(self, **kwargs):
         super().__init__()
-        # Describes a mechanism to update the dataset.
-        self._add_property(
-            "dataset_datasetUpdateMechanism",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
-        )
-        # Describes if any sensitive personal information is present in the dataset.
-        self._add_property(
-            "dataset_sensitivePersonalInformation",
-            PresenceType(),
-            json_name="https://rdf.spdx.org/v3/Dataset/sensitivePersonalInformation",
-        )
-        # Describes a sensor used for collecting the data.
-        self._add_property(
-            "dataset_sensor",
-            ListProp(ObjectProp(DictionaryEntry, False)),
-            json_name="https://rdf.spdx.org/v3/Dataset/sensor",
-        )
-        # Describes how the dataset was collected.
-        self._add_property(
-            "dataset_dataCollectionProcess",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Dataset/dataCollectionProcess",
-        )
         # Describes the anonymization methods used.
         self._add_property(
             "dataset_anonymizationMethodUsed",
             ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
-        )
-        # The field describes the availability of a dataset.
-        self._add_property(
-            "dataset_datasetAvailability",
-            dataset_DatasetAvailabilityType(),
-            json_name="https://rdf.spdx.org/v3/Dataset/datasetAvailability",
-        )
-        # Describes the type of the given dataset.
-        self._add_property(
-            "dataset_datasetType",
-            ListProp(dataset_DatasetType()),
-            json_name="https://rdf.spdx.org/v3/Dataset/datasetType",
-            min_count=1,
+            iri="https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
         )
         # Describes the confidentiality level of the data points contained in the dataset.
         self._add_property(
             "dataset_confidentialityLevel",
             dataset_ConfidentialityLevelType(),
-            json_name="https://rdf.spdx.org/v3/Dataset/confidentialityLevel",
+            iri="https://rdf.spdx.org/v3/Dataset/confidentialityLevel",
+        )
+        # Describes how the dataset was collected.
+        self._add_property(
+            "dataset_dataCollectionProcess",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Dataset/dataCollectionProcess",
         )
         # Describes the preprocessing steps that were applied to the raw data to create the given dataset.
         self._add_property(
             "dataset_dataPreprocessing",
             ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Dataset/dataPreprocessing",
+            iri="https://rdf.spdx.org/v3/Dataset/dataPreprocessing",
+        )
+        # The field describes the availability of a dataset.
+        self._add_property(
+            "dataset_datasetAvailability",
+            dataset_DatasetAvailabilityType(),
+            iri="https://rdf.spdx.org/v3/Dataset/datasetAvailability",
         )
         # Describes potentially noisy elements of the dataset.
         self._add_property(
             "dataset_datasetNoise",
             StringProp(),
-            json_name="https://rdf.spdx.org/v3/Dataset/datasetNoise",
-        )
-        # Records the biases that the dataset is known to encompass.
-        self._add_property(
-            "dataset_knownBias",
-            ListProp(StringProp()),
-            json_name="https://rdf.spdx.org/v3/Dataset/knownBias",
-        )
-        # Describes what the given dataset should be used for.
-        self._add_property(
-            "dataset_intendedUse",
-            StringProp(),
-            json_name="https://rdf.spdx.org/v3/Dataset/intendedUse",
+            iri="https://rdf.spdx.org/v3/Dataset/datasetNoise",
         )
         # Captures the size of the dataset.
         self._add_property(
             "dataset_datasetSize",
             NonNegativeIntegerProp(),
-            json_name="https://rdf.spdx.org/v3/Dataset/datasetSize",
+            iri="https://rdf.spdx.org/v3/Dataset/datasetSize",
+        )
+        # Describes the type of the given dataset.
+        self._add_property(
+            "dataset_datasetType",
+            ListProp(dataset_DatasetType()),
+            iri="https://rdf.spdx.org/v3/Dataset/datasetType",
+            min_count=1,
+        )
+        # Describes a mechanism to update the dataset.
+        self._add_property(
+            "dataset_datasetUpdateMechanism",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
+        )
+        # Describes what the given dataset should be used for.
+        self._add_property(
+            "dataset_intendedUse",
+            StringProp(),
+            iri="https://rdf.spdx.org/v3/Dataset/intendedUse",
+        )
+        # Records the biases that the dataset is known to encompass.
+        self._add_property(
+            "dataset_knownBias",
+            ListProp(StringProp()),
+            iri="https://rdf.spdx.org/v3/Dataset/knownBias",
+        )
+        # Describes if any sensitive personal information is present in the dataset.
+        self._add_property(
+            "dataset_sensitivePersonalInformation",
+            PresenceType(),
+            iri="https://rdf.spdx.org/v3/Dataset/sensitivePersonalInformation",
+        )
+        # Describes a sensor used for collecting the data.
+        self._add_property(
+            "dataset_sensor",
+            ListProp(ObjectProp(DictionaryEntry, False)),
+            iri="https://rdf.spdx.org/v3/Dataset/sensor",
         )
         self._set_init_props(**kwargs)
 
@@ -4068,30 +4943,50 @@ class Context(object):
 
         return contexts
 
-    def compact(self, _id, vocab=None):
+    def compact(self, _id):
+        return self.__compact_contexts(_id)
+
+    def compact_vocab(self, _id, vocab=None):
         with self.vocab_push(vocab):
             if not self.__vocabs:
                 v = ""
             else:
                 v = self.__vocabs[-1]
 
-            if v not in self.__compacted or _id not in self.__compacted[v]:
-                self.__compacted.setdefault(v, {})[_id] = self.__compact(
-                    _id,
-                    self.__get_vocab_contexts() + self.contexts,
-                )
-            return self.__compacted[v][_id]
+            return self.__compact_contexts(_id, v, self.__get_vocab_contexts())
 
-    def __compact(self, _id, contexts):
+    def __compact_contexts(self, _id, v="", apply_vocabs=False):
+        if v not in self.__compacted or _id not in self.__compacted[v]:
+            if apply_vocabs:
+                contexts = self.__get_vocab_contexts() + self.contexts
+            else:
+                contexts = self.contexts
+
+            self.__compacted.setdefault(v, {})[_id] = self.__compact(
+                _id,
+                contexts,
+                apply_vocabs,
+            )
+        return self.__compacted[v][_id]
+
+    def __compact(self, _id, contexts, apply_vocabs):
+        def remove_prefix(_id, value):
+            possible = set()
+            if _id.startswith(value):
+                tmp_id = _id[len(value) :]
+                possible.add(tmp_id)
+                possible |= collect_possible(tmp_id)
+            return possible
+
         def collect_possible(_id):
             possible = set()
             for ctx in contexts:
                 for name, value in ctx.items():
                     if name == "@vocab":
-                        if _id.startswith(value):
-                            tmp_id = _id[len(value) :]
-                            possible.add(tmp_id)
-                            possible |= collect_possible(tmp_id)
+                        if apply_vocabs:
+                            possible |= remove_prefix(_id, value)
+                    elif name == "@base":
+                        possible |= remove_prefix(_id, value)
                     else:
                         if isinstance(value, dict):
                             value = value["@id"]
@@ -4118,14 +5013,14 @@ class Context(object):
 
         return possible[0]
 
-    def expand(self, _id, vocab=""):
-        with self.vocab_push(vocab):
-            if not self.__vocabs:
-                v = ""
-            else:
-                v = self.__vocabs[-1]
+    def is_relative(self, _id):
+        import re
 
-            if v not in self.__expanded or _id not in self.__expanded[v]:
+        return not re.match(r"[^:]+:", _id)
+
+    def __expand_contexts(self, _id, v="", apply_vocabs=False):
+        if v not in self.__expanded or _id not in self.__expanded[v]:
+            if apply_vocabs:
                 contexts = self.__get_vocab_contexts() + self.contexts
 
                 # Apply contexts
@@ -4133,10 +5028,29 @@ class Context(object):
                     for name, value in ctx.items():
                         if name == "@vocab":
                             _id = value + _id
+            else:
+                contexts = self.contexts
 
-                self.__expanded.setdefault(v, {})[_id] = self.__expand(_id, contexts)
+            for ctx in contexts:
+                for name, value in ctx.items():
+                    if name == "@base" and self.is_relative(_id):
+                        _id = value + _id
 
-            return self.__expanded[v][_id]
+            self.__expanded.setdefault(v, {})[_id] = self.__expand(_id, contexts)
+
+        return self.__expanded[v][_id]
+
+    def expand(self, _id):
+        return self.__expand_contexts(_id)
+
+    def expand_vocab(self, _id, vocab=""):
+        with self.vocab_push(vocab):
+            if not self.__vocabs:
+                v = ""
+            else:
+                v = self.__vocabs[-1]
+
+            return self.__expand_contexts(_id, v, True)
 
     def __expand(self, _id, contexts):
         for ctx in contexts:
@@ -4172,14 +5086,16 @@ def main():
     args = parser.parse_args()
 
     with args.infile.open("r") as f:
-        objects, _ = read_jsonld(f)
+        d = JSONLDDeserializer()
+        objects, _ = d.read(f)
 
     if args.print:
         print_tree(objects)
 
     if args.outfile:
         with args.outfile.open("wb") as f:
-            write_jsonld(objects, f)
+            s = JSONLDSerializer()
+            s.write(objects, f)
 
     return 0
 

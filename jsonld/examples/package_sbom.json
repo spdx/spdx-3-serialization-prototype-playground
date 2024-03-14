@@ -3,8 +3,10 @@
     "@graph": [
         {
             "type": "CreationInfo",
-            "spdxId": "_:creationinfo",
-            "createdBy": "http://spdx.example.com/Agent/JoshuaWatt",
+            "id": "_:creationinfo",
+            "createdBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ],
             "specVersion": "3.0.0",
             "created": "2024-03-06T00:00:00Z"
         },
@@ -40,7 +42,9 @@
             "rootElement": [
                 "http://spdx.example.com/Package1"
             ],
-            "software_sbomType": "build"
+            "software_sbomType": [
+                "build"
+            ]
         },
         {
             "type": "software_Package",
@@ -50,7 +54,9 @@
             "software_packageVersion": "1.0",
             "software_downloadLocation": "http://dl.example.com/my-package_1.0.0.tar",
             "builtTime": "2024-03-06T00:00:00Z",
-            "originatedBy": "http://spdx.example.com/Agent/JoshuaWatt"
+            "originatedBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ]
         },
         {
             "type": "software_File",
@@ -63,10 +69,13 @@
             ],
             "software_copyrightText": "Copyright 2024, Joshua Watt",
             "builtTime": "2024-03-06T00:00:00Z",
-            "originatedBy": "http://spdx.example.com/Agent/JoshuaWatt"
+            "originatedBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ]
         },
         {
             "type": "Relationship",
+            "spdxId": "http://spdx.example.com/Relationship/1",
             "creationInfo": "_:creationinfo",
             "from": "http://spdx.example.com/Package1",
             "relationshipType": "contains",

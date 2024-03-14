@@ -69,6 +69,26 @@ For the present, these can be copied into your codebase to be used.
 The Examples in the `examples` directory have all been validated against the
 provided JSON schema and SHACL model
 
+## Regenerating
+
+The JSON schema and language bindings in this repository are generated using
+`shacl2code` with the following commands:
+
+```shell
+shacl2code generate -i spdx-3.0-ontology.rdf.ttl \
+    -u spdx-3.0-context.json-ld \
+        https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld \
+    jsonschema -o spdx-3.0-schema.json
+
+shacl2code generate -i spdx-3.0-ontology.rdf.ttl \
+    -u spdx-3.0-context.json-ld \
+       https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld \
+    python -o bindings/spdx3_0.py
+```
+
+## Checking
+
+The `check.sh` script will validate all of the files against the json schema and SHACL model
 
 ## TODOs
 1. The examples in the `compactification_examples` directory are not updated to
