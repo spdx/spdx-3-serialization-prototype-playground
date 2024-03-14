@@ -68,7 +68,7 @@
         {
             "type": "Relationship",
             "creationInfo": "_:creationinfo",
-            "from": "http://spdx.exampl.com/Package1",
+            "from": "http://spdx.example.com/Package1",
             "relationshipType": "contains",
             "to": [
                 "http://spdx.example.com/Package1/myprogram"
