@@ -19,7 +19,7 @@ If you do would like to construct the complete example from this Markdown file,
 use the following command:
 
 ```shell
-cat GETTING_STARTED.md | awk '/```json/, $0=="```" {if ($0 !~ /^```.*/ ) print}'
+cat GETTING_STARTED.md | awk '/^```json/, $0=="```" {if ($0 !~ /^```.*/ ) print}'
 ```
 
 Please note that all descriptions of properties, classes, etc. are
@@ -184,13 +184,14 @@ Hopefully this is making sense. We are saying this object is a
 [CreationInfo][Class_CreationInfo].
 
 ```json
-            "spdxId": "_:creationinfo",
+            "id": "_:creationinfo",
 ```
 
-Another `spdxId`, but notice a few things. First of all, this one is _not_ a
-URI like our [Person][Class_Person], but instead starts with a `_:`. This type
-of identifier is known as a _blank node_. Blank nodes can be used in place of
-URI for a `spdxId`, but they _only_ have scope within this SPDX document. What
+This object also has an `id` similar to the `spdxId` of our person, but it is
+subtly different First of all, this one is _not_ a URI like our
+[Person][Class_Person], but instead starts with a `_:`. This type of identifier
+is known as a _blank node_. Blank nodes serve a similar purpose to the URI of
+the `spdxId`, however they _only_ have scope within this SPDX document. What
 this means is that it be impossible to reference this
 [CreationInfo][Class_CreationInfo] by name outside of this document. Inside the
 document, you can use this identifier to refer to this object. The string after
@@ -199,16 +200,18 @@ string that you choose.
 
 It should be noted that [CreationInfo][Class_CreationInfo] does _not_ derive
 from [Element][Class_Element] class (like our previous example of
-[ExternalIdentifier][Class_ExternalIdentifier]), and as such the `spdxId`
-property is technically optional. However, since we will need to refer to this
-object at other places in the document, we must give it an identifier.  This
-also means that this object does not have a mandatory
-[creationInfo][Property_creationInfo] property.
+[ExternalIdentifier][Class_ExternalIdentifier]), and as such the `id` property
+is technically optional. However, since we will need to refer to this object at
+other places in the document, we must give it an identifier.  This also means
+that this object does not have a mandatory
+[creationInfo][Property_creationInfo] property (which makes sense since it
+would be a circular reference). Finally, [CreationInfo][Class_CreationInfo] is
+_only_ allowed to have a blank node identifier.
 
 If you look back at the [Person][Class_Person] we just created, you'll notice
 that its [creationInfo][Property_creationInfo] property has the string value
-that matches the `spdxId` of this object; this is how objects are linked
-together by reference in SPDX.
+that matches the `id` of this object; this is how objects are linked together
+by reference in SPDX.
 
 Next, we need to specify which version of the SPDX spec that elements linking
 to this [CreationInfo][Class_CreationInfo] are conforming to:
@@ -222,14 +225,17 @@ who (or what) created the elements that are linked to this
 [CreationInfo][Class_CreationInfo]:
 
 ```json
-            "createdBy": "http://spdx.example.com/Agent/JoshuaWatt",
+            "createdBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ],
 ```
 
-This property may reference any class that derives from [Agent][Class_Agent].
-Since you are the person creating the document, put the `spdxId` of your
-[Person][Class_Person] element here to link them together. Note that even
-though this is using a full URI instead of a blank node, this is linking in the
-same way as [creationInfo][Property_creationInfo] described above.
+This property is a list of reference to any class that derives from
+[Agent][Class_Agent]. Since you are the person creating the document, put a
+single list item that is the `spdxId` of your [Person][Class_Person] element
+here to link them together.  Note that even though this is using a full URI
+instead of a blank node, this is linking in the same way as
+[creationInfo][Property_creationInfo] described above.
 
 Also, it is worth noting that this does indeed create a circular reference
 between our [Person][Class_Person].[creationInfo][Property_creationInfo]
@@ -409,17 +415,21 @@ Note that we are back in the `Core` profile properties here (specifically,
 
 
 Next, we want to indicate who actually made the package we are describing. This
-is done using the (optional) [originatedBy][Property_originatedBy] property:
+is done using the (optional) [originatedBy][Property_originatedBy] array
+property:
 
 ```json
-            "originatedBy": "http://spdx.example.com/Agent/JoshuaWatt",
+            "originatedBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ],
 ```
 
-In this example, you can put your [Person][Class_Person] `spdxId` here to
-indicate that _you_ actually made the package. Note that while we are using the
-same `spdxId` as we used in the [CreationInfo][Class_CreationInfo], this is not
-required.  [originatedBy][Property_originatedBy] is the property that we used
-to describe who made the actual package being described by the
+In this example, you can put a single element that references your
+[Person][Class_Person] `spdxId` here to indicate that _you_ actually made the
+package. Note that while we are using the same `spdxId` as we used in the
+[CreationInfo][Class_CreationInfo], this is not required.
+[originatedBy][Property_originatedBy] is the property that we used to describe
+who made the actual package being described by the
 [software_Package][Class_software_Package] and not the JSON object itself.
 
 Finally, we would like to inform consumers of our SPDX how they can validate
@@ -468,7 +478,9 @@ Lets get started with our first file, the program executable:
                 }
             ],
             "builtTime": "2024-03-05T00:00:00Z",
-            "originatedBy": "http://spdx.example.com/Agent/JoshuaWatt",
+            "originatedBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ],
 ```
 
 We've seen all this before, so hopefully it all makes sense.
@@ -521,7 +533,9 @@ program:
                 }
             ],
             "builtTime": "2024-03-05T00:00:00Z",
-            "originatedBy": "http://spdx.example.com/Agent/JoshuaWatt",
+            "originatedBy": [
+                "http://spdx.example.com/Agent/JoshuaWatt"
+            ],
             "software_primaryPurpose": "configuration"
         },
 ```
@@ -627,7 +641,9 @@ document.
 of the SBOM, which is our [software_Package][Class_software_Package]:
 
 ```json
-            "rootElement": "http://spdx.example.com/amazing-widget",
+            "rootElement": [
+                "http://spdx.example.com/amazing-widget"
+            ],
 ```
 
 Unlike [SpdxDocument][Class_SpdxDocument] however, there is no implicit value
@@ -645,11 +661,13 @@ included:
             ],
 ```
 
-Finally, we need to specify what type of BOM this is using the
+Finally, we need to specify what type(s) of BOM this is using the
 [software_sbomType][Property_software_sbomType] property:
 
 ```json
-            "software_sbomType": "build"
+            "software_sbomType": [
+                "build"
+            ]
         }
 ```
 
