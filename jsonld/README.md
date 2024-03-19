@@ -27,6 +27,7 @@ For example, to use the Python `check-jsonschema` package, use:
 ```shell
 check-jsonschema \
     -v --traceback-mode full \
+    --no-cache \
     --schemafile https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-schema.json \
     <FILE_TO_CHECK>
 ```
