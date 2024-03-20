@@ -30,31 +30,36 @@ official documentation are provided where possible.
 ## The Preamble
 
 All documents need to start somewhere, and SPDX documents are no exception.
+
+The root of all SPDX documents will be a JSON object, so start with that:
 ```json
 {
-    "@context": "https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld",
-    "@graph": [
 ```
 
-These lines have a few important things. First, the document starts with an
-opening `{`, meaning the root JSON type is an object. Next, we have the
-`@context` line. SPDX documents are designed to be a strict subset of
-[JSON-LD][1], such that they can be parsed using either a full JSON-LD parser
-if you need the full power of [linked documents][2] or [RDF][3], or a much
-simpler JSON parser if all you care about is extracting meaningful SPDX data
-from the document.
+Next, we need to identify that the document is an SPDX 3 JSON-LD document, which is done with:
+```json
+    "@context": "https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld",
+```
+SPDX documents are designed to be a strict subset of [JSON-LD][1], such that
+they can be parsed using either a full JSON-LD parser if you need the full
+power of [linked documents][2] or [RDF][3], or a much simpler JSON parser if
+all you care about is extracting meaningful SPDX data from the document.
 
 Because the document is valid JSON-LD, the `@context` must be provided to tell
 the JSON-LD parser how to expand the human readable names in the document into
 full IRIs (don't worry if you don't know what that means, it's not really that
 important). You can think of this line as telling us "This is an SPDX document,
-and this provided URL tells us how to decode it". The SPDX JSON Schema will
-force you to put the correct value here when validating a document.
+and this provided URL tells us how to decode it". The [SPDX JSON
+Schema][spdxjsonschema] will force you to put the correct value here when
+validating a document.
 
-Since our root JSON element must be an object so it can have an `@context` key,
-we need a way to have a list of SPDX objects that we will be creating. The
-mechanism for doing this in JSON-LD is to have the `@graph` member of the root
-object be the list of objects, so thats what this line is for
+
+Now, we need to specify the list of objects that we want to create in this
+document. JSON-LD has a special way of specifying this list using the `@graph`
+property of the root object like so:
+```json
+    "@graph": [
+```
 
 
 ## Tell us about yourself
@@ -65,33 +70,39 @@ is writing this document (you!), so lets get started with it:
 ```json
         {
             "type": "Person",
-            "spdxId": "http://spdx.example.com/Person/JoshuaWatt",
 ```
 
 This is the basic format for any object in SPDX; all objects have one required
 property named `type` that tells us what this object actually is, so here we
 say this is a [Person][Class_Person].
 
-All objects also have a property called `spdxId`. This property is the URI that
-should give this object a universally unique name. Although this property
-_looks_ like a HTTP URL, it is in fact not. Technically speaking, a URL defined
-a _Location_, where as a URI defines an _Identifier_ (i.e. the name by which
-something is known). In all likelihood, a URI is not a resolvable location from
-whence you can do an HTTP `GET` to retrieve data, but rather just a way of
-constructing a namespaced identifier. This identifier can be used within this
-document to refer to this object (more on that later), or it can be referenced
-from other documents to refer to this specific object (although in that case
-there needs to be additional information to describe how to find this
-document). URI's are considered to be universally unique, so any objects
-constructed with this URI are considered to be the same object, and any
-references to this URI is a reference to this specific object we are creating
-now.
+Next, we need to name our object:
+```json
+
+            "spdxId": "http://spdx.example.com/Person/JoshuaWatt",
+```
+
+Most objects can have some sort of "ID" property that gives it a name. In the
+case of [Person][Class_Person], that property is called `spdxId` (inherited
+from [Element][Class_Element]). This property is the URI that should give this
+object a universally unique name. Although this property _looks_ like a HTTP
+URL, it is in fact not. Technically speaking, a URL defined a _Location_, where
+as a URI defines an _Identifier_ (i.e. the name by which something is known).
+In all likelihood, a URI is not a resolvable location from whence you can do an
+HTTP `GET` to retrieve data, but rather just a way of constructing a namespaced
+identifier. This identifier can be used within this document to refer to this
+object (more on that later), or it can be referenced from other documents to
+refer to this _specific_ object (although in that case there needs to be
+additional information to describe how to find this document). URI's are
+considered to be universally unique, so any objects constructed with this URI
+are considered to be the same object, and any references to this URI is a
+reference to this _specific_ object we are creating.
 
 If you work for a company, own a domain, etc. it is encouraged to use that (or
 some subdomain of it) in place of `spdx.example.com`.
 
 In practice, many `spdxId` values will have some sort of hash or random
-UUID-like string incorporated to make the unique.
+UUID-like string incorporated to make them unique.
 
 Moving on from this, we have:
 ```json
@@ -108,9 +119,7 @@ later.
 ```
 
 The optional [name][Property_name] property is inherited from the `Element`
-class, bu and means "the common name for the thing", or in this case, your
-name.
-
+class, and means "the common name for the thing", or in this case, your name.
 
 As our last step, we want to indicate another way by which You are known to the
 world; specifically your E-mail address.
@@ -134,8 +143,7 @@ objects, so start by adding one to the array:
 Again notice this uses the `type` property to identify what the object is.
 However it should be noted that this is our first object that is not derived
 from [Element][Class_Element], and therefore it does not need a `spdxId`
-property (although, you can add it if needed to reference this object, but this
-is unlikely in this case).
+property.
 
 Next, lets add the relevant information about your email address:
 
@@ -165,15 +173,15 @@ prepare for the next object:
 ## Where did all this stuff come from?
 
 Our next object is going to be a [CreationInfo][Class_CreationInfo] object. It
-is required to provide one for every SPDX document as all objects derived from
+is required to provide one for every SPDX document, as all objects derived from
 [Element][Class_Element] must link to one in their
-[creationInfo][Property_creationInfo] property to indicate where the SPDX
-object came from.
+[creationInfo][Property_creationInfo] property to indicate where they came
+from.
 
 Note that the [CreationInfo][Class_CreationInfo] describes where a SPDX
-[Element][Class_Element] itself came from (that is, who wrote the actual JSON). This
-is a distinct concept from describing where the thing an [Element][Class_Element]
-describes comes from, which is covered later.
+[Element][Class_Element] itself came from (that is, who wrote the actual JSON).
+This is a distinct concept from describing where the thing an
+[Element][Class_Element] _describes_ comes from, which is covered later.
 
 Lets get started:
 ```json
@@ -231,7 +239,7 @@ who (or what) created the elements that are linked to this
 ```
 
 This property is a list of reference to any class that derives from
-[Agent][Class_Agent]. Since you are the person creating the document, put a
+[Agent][Class_Agent]. Since you are the person writing the document, put a
 single list item that is the `spdxId` of your [Person][Class_Person] element
 here to link them together.  Note that even though this is using a full URI
 instead of a blank node, this is linking in the same way as
@@ -325,8 +333,8 @@ is, all the objects we are writing) are implicitly added to the
 
 ## A Complete Document!
 
-At this point, we have a completed SPDX document (albeit, it has an unresolved
-references in
+At this point, we have a completed SPDX document (albeit, one that has an
+unresolved references in
 [SpdxDocument][Class_SpdxDocument].[rootElement][Property_rootElement]). This
 is a fully valid document because it has the SPDX 3.0 preamble, and the
 required [SpdxDocument][Class_SpdxDocument] object, which in turn requires a
@@ -433,7 +441,7 @@ who made the actual package being described by the
 [software_Package][Class_software_Package] and not the JSON object itself.
 
 Finally, we would like to inform consumers of our SPDX how they can validate
-the package to ensure its contents have changed, or to check if a file that
+the package to ensure its contents have not changed, or to check if a file that
 they have is the same one being described by this document. This is done using
 the [verifiedUsing][Property_verifiedUsing] property, which is an array of
 [IntegrityMethod][Class_IntegrityMethod] objects (or subclasses).
@@ -548,7 +556,7 @@ have one small problem: there is nothing that tells us that our files are
 actually contained by the package.
 
 In order to do this, we must introduce the SPDX
-[Relationship][Class_Relationship].  These are a very power concept in SPDX
+[Relationship][Class_Relationship].  These are a very powerful concept in SPDX
 that allows linking [Element][Class_Element]s and describing how they are
 related.
 
@@ -580,7 +588,7 @@ we are using `contains` which is defined as "The `from`
 
 Now, we need to describe what [Element][Class_Element]s are being connected.
 [Relationship][Class_Relationship]s always have a directionality associated
-with them: you can thing of them as an arrow pointing from their
+with them: you can think of them as an arrow pointing from their
 [from][Property_from] property to their [to][Property_to] properties.
 [from][Property_from] is always required and must be a single object, whereas
 [to][Property_to] is a list of zero or more objects. Lets write the JSON to
@@ -692,6 +700,7 @@ walk through has been instructive and you are ready to get started with SPDX!
 [2]: https://en.wikipedia.org/wiki/Linked_data
 [3]: https://www.w3.org/RDF/
 [4]: https://en.wikipedia.org/wiki/ISO_8601
+[spdxjsonschema]: https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-schema.json
 [Class_Agent]: https://spdx.github.io/spdx-spec/v3.0/model/Core/Classes/Agent
 [Class_Artifact]: https://spdx.github.io/spdx-spec/v3.0/model/Core/Classes/Artifact
 [Class_CreationInfo]: https://spdx.github.io/spdx-spec/v3.0/model/Core/Classes/CreationInfo
