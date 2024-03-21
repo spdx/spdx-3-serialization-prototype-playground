@@ -1,0 +1,20 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$comment": "SPDX 'lite' schema. The schema forces the root object to be an SpdxDocument instead of using '@graph', and elements are generally inlined where possible instead of using references, but otherwise is fully valid JSON-LD (and still conforms to the main SPDX schema",
+    "type": "object",
+
+    "allOf": [
+        {
+            "properties": {
+                "@context": {
+                    "const": "https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld"
+                }
+            },
+            "required": ["@context"]
+        },
+        {
+            "$ref": "https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-schema.json#/$defs/SpdxDocument"
+        }
+    ],
+    "unevaluatedProperties": false
+}
