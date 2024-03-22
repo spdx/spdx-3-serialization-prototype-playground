@@ -3,7 +3,7 @@
     "@graph": [
         {
             "type": "CreationInfo",
-            "id": "_:creationinfo",
+            "@id": "_:creationinfo",
             "createdBy": [
                 "http://spdx.example.com/Agent/JoshuaWatt"
             ],
