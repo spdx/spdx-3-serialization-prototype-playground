@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import time
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -43,7 +44,9 @@ class Property(ABC):
         if self.pattern is not None and not re.search(
             self.pattern, self.to_string(value)
         ):
-            raise ValueError(f"Value is not correctly formatted. Got '{value}'")
+            raise ValueError(
+                f"Value is not correctly formatted. Got '{self.to_string(value)}'"
+            )
 
     def set(self, value):
         return value
@@ -60,11 +63,13 @@ class Property(ABC):
     def walk(self, value, callback, path):
         callback(value, path)
 
-    def link_prop(self, value, link_cache, missing, visited):
+    def iter_objects(self, value, recursive, visited):
+        return []
+
+    def link_prop(self, value, doc, missing, visited):
         return value
 
-    @classmethod
-    def to_string(cls, value):
+    def to_string(self, value):
         return str(value)
 
     @abstractmethod
@@ -72,7 +77,7 @@ class Property(ABC):
         pass
 
     @abstractmethod
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         pass
 
 
@@ -89,7 +94,7 @@ class StringProp(Property):
     def encode(self, encoder, value, state):
         encoder.write_string(value)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         return decoder.read_string()
 
 
@@ -97,30 +102,33 @@ class AnyURIProp(StringProp):
     def encode(self, encoder, value, state):
         encoder.write_iri(value)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         return decoder.read_iri()
 
 
 class DateTimeProp(Property):
     """
-    A Date/Time Object
+    A Date/Time Object with optional timezone
     """
 
     VALID_TYPES = datetime
     UTC_FORMAT_STR = "%Y-%m-%dT%H:%M:%SZ"
-    REGEX = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$"
+    REGEX = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?$"
 
     def set(self, value):
         return self._normalize(value)
 
     def encode(self, encoder, value, state):
-        encoder.write_datetime(value)
+        encoder.write_datetime(self.to_string(value))
 
-    def decode(self, decoder, *, object_ids=None):
-        return self._normalize(decoder.read_datetime())
+    def decode(self, decoder, *, doc=None):
+        s = decoder.read_datetime()
+        if s is None:
+            return None
+        v = self.from_string(s)
+        return self._normalize(v)
 
-    @classmethod
-    def _normalize(cls, value):
+    def _normalize(self, value):
         if value.utcoffset() is None:
             value = value.astimezone()
         offset = value.utcoffset()
@@ -130,26 +138,32 @@ class DateTimeProp(Property):
         value = value.replace(microsecond=0)
         return value
 
-    @classmethod
-    def to_string(cls, value):
-        value = cls._normalize(value)
+    def to_string(self, value):
+        value = self._normalize(value)
         if value.tzinfo == timezone.utc:
-            return value.strftime(cls.UTC_FORMAT_STR)
+            return value.strftime(self.UTC_FORMAT_STR)
         return value.isoformat()
 
-    @classmethod
-    def from_string(cls, value):
-        if not re.match(cls.REGEX, value):
+    def from_string(self, value):
+        if not re.match(self.REGEX, value):
             raise ValueError(f"'{value}' is not a correctly formatted datetime")
         if "Z" in value:
             d = datetime(
-                *(time.strptime(value, cls.UTC_FORMAT_STR)[0:6]),
+                *(time.strptime(value, self.UTC_FORMAT_STR)[0:6]),
                 tzinfo=timezone.utc,
             )
         else:
             d = datetime.fromisoformat(value)
 
-        return cls._normalize(d)
+        return self._normalize(d)
+
+
+class DateTimeStampProp(DateTimeProp):
+    """
+    A Date/Time Object with required timestamp
+    """
+
+    REGEX = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$"
 
 
 class IntegerProp(Property):
@@ -161,7 +175,7 @@ class IntegerProp(Property):
     def encode(self, encoder, value, state):
         encoder.write_integer(value)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         return decoder.read_integer()
 
 
@@ -188,7 +202,7 @@ class BooleanProp(Property):
     def encode(self, encoder, value, state):
         encoder.write_bool(value)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         return decoder.read_bool()
 
 
@@ -201,7 +215,7 @@ class FloatProp(Property):
     def encode(self, encoder, value, state):
         encoder.write_float(value)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         return decoder.read_float()
 
 
@@ -232,6 +246,18 @@ class ObjectProp(Property):
         else:
             callback(value, path)
 
+    def iter_objects(self, value, recursive, visited):
+        if value is None or isinstance(value, str):
+            return
+
+        if value not in visited:
+            visited.add(value)
+            yield value
+
+            if recursive:
+                for c in value.iter_objects(recursive=True, visited=visited):
+                    yield c
+
     def encode(self, encoder, value, state):
         if value is None:
             raise ValueError("Object cannot be None")
@@ -240,24 +266,25 @@ class ObjectProp(Property):
             encoder.write_iri(value)
             return
 
-        return value.encode(encoder, state, is_reference=True)
+        return value.encode(encoder, state)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         iri = decoder.read_iri()
         if iri is not None:
-            if object_ids and iri in object_ids:
-                return object_ids[iri]
+            if doc is not None:
+                return doc.find_by_id(iri, iri)
             return iri
 
-        return SHACLObject.decode(decoder, object_ids=object_ids)
+        return SHACLObject.decode(decoder, doc=doc)
 
-    def link_prop(self, value, link_cache, missing, visited):
+    def link_prop(self, value, doc, missing, visited):
         if value is None:
             return value
 
         if isinstance(value, str):
-            if value in link_cache:
-                return link_cache[value]
+            o = doc.find_by_id(value)
+            if o is not None:
+                return o
 
             if missing is not None:
                 missing.add(value)
@@ -265,10 +292,10 @@ class ObjectProp(Property):
             return value
 
         # De-duplicate IDs
-        if value._id and value._id is not link_cache[value._id]:
-            value = link_cache[value._id]
+        if value._id:
+            value = doc.find_by_id(value._id, value)
 
-        value.link_helper(link_cache, missing, visited)
+        value.link_helper(doc, missing, visited)
         return value
 
 
@@ -375,11 +402,16 @@ class ListProp(Property):
         for idx, v in enumerate(value):
             self.prop.walk(v, callback, path + [f"[{idx}]"])
 
-    def link_prop(self, value, link_cache, missing, visited):
+    def iter_objects(self, value, recursive, visited):
+        for v in value:
+            for c in self.prop.iter_objects(v, recursive, visited):
+                yield c
+
+    def link_prop(self, value, doc, missing, visited):
         if isinstance(value, ListProxy):
-            data = [self.prop.link_prop(v, link_cache, missing, visited) for v in value]
+            data = [self.prop.link_prop(v, doc, missing, visited) for v in value]
         else:
-            data = [self.prop.link_prop(v, link_cache, missing, visited) for v in value]
+            data = [self.prop.link_prop(v, doc, missing, visited) for v in value]
 
         return ListProxy(self.prop, data=data)
 
@@ -391,10 +423,10 @@ class ListProp(Property):
                 with list_s.write_list_item() as item_s:
                     self.prop.encode(item_s, v, state)
 
-    def decode(self, decoder, *, object_ids=None):
+    def decode(self, decoder, *, doc=None):
         data = []
         for val_d in decoder.read_list():
-            v = self.prop.decode(val_d, object_ids=object_ids)
+            v = self.prop.decode(val_d, doc=doc)
             self.prop.validate(v)
             data.append(v)
 
@@ -403,6 +435,10 @@ class ListProp(Property):
 
 class EnumProp(Property):
     VALID_TYPES = str
+
+    def __init__(self, *, pattern=None, context=[]):
+        super().__init__(pattern=pattern)
+        self.context = context
 
     def validate(self, value):
         super().validate(value)
@@ -413,61 +449,106 @@ class EnumProp(Property):
             )
 
     def encode(self, encoder, value, state):
+        for iri, compact in self.context:
+            if iri == value:
+                encoder.write_enum(value, self, compact)
+                return
+
         encoder.write_enum(value, self)
 
-    def decode(self, decoder, *, object_ids=None):
-        return decoder.read_enum(self)
+    def decode(self, decoder, *, doc=None):
+        v = decoder.read_enum(self)
+        for iri, compact in self.context:
+            if v == compact:
+                return iri
+        return v
 
 
-class Refable(Enum):
-    no = 1
-    local = 2
-    optional = 3
-    yes = 4
-    always = 5
+class NodeKind(Enum):
+    BlankNode = 1
+    IRI = 2
+    BlankNodeOrIRI = 3
+
+
+def register(type_iri, compact_type=None):
+    def add_deserializer(key, c):
+        assert (
+            key not in SHACLObject.DESERIALIZERS
+        ), f"{key} already registered to {SHACLObject.DESERIALIZERS[key].__name__}"
+        SHACLObject.DESERIALIZERS[key] = c
+
+    def decorator(c):
+        assert issubclass(
+            c, SHACLObject
+        ), f"{c.__name__} is not derived from SHACLObject"
+
+        c.TYPE = type_iri
+        add_deserializer(type_iri, c)
+
+        c.COMPACT_TYPE = compact_type
+        if compact_type:
+            add_deserializer(compact_type, c)
+
+        # Registration is deferred until the first instance of class is created
+        # so that it has access to any other defined class
+        c._NEEDS_REG = True
+        return c
+
+    return decorator
+
+
+register_lock = threading.Lock()
 
 
 @functools.total_ordering
 class SHACLObject(object):
     DESERIALIZERS = {}
-    REFABLE = Refable.optional
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = None
+    COMPACT_TYPE = None
 
-    def __init__(self):
+    def __init__(self, **kwargs):
+        with register_lock:
+            cls = self.__class__
+            if cls._NEEDS_REG:
+                cls._OBJ_PROPERTIES = {}
+                cls._OBJ_IRIS = {}
+                cls._register_props()
+                cls._NEEDS_REG = False
+
         self._obj_data = {}
-        self._obj_properties = {}
-        self._obj_iris = {}
         self._obj_metadata = {}
 
-        self._add_property("_id", StringProp(), iri="@id")
+        for iri, prop, _, _, _, _ in self.__iter_props():
+            self._obj_data[iri] = prop.init()
 
-    def _set_init_props(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    @classmethod
+    def _register_props(cls):
+        cls._add_property("_id", StringProp(), iri="@id")
+
+    @classmethod
     def _add_property(
-        self,
+        cls,
         pyname,
         prop,
         iri,
         min_count=None,
         max_count=None,
+        compact=None,
     ):
-        if pyname in self._obj_iris:
-            raise KeyError(
-                f"'{pyname}' is already defined for '{self.__class__.__name__}'"
-            )
-        if iri in self._obj_properties:
-            raise KeyError(
-                f"'{iri}' is already defined for '{self.__class__.__name__}'"
-            )
+        if pyname in cls._OBJ_IRIS:
+            raise KeyError(f"'{pyname}' is already defined for '{cls.__name__}'")
+        if iri in cls._OBJ_PROPERTIES:
+            raise KeyError(f"'{iri}' is already defined for '{cls.__name__}'")
 
-        while hasattr(self, pyname):
+        while hasattr(cls, pyname):
             pyname = pyname + "_"
 
-        self._obj_iris[pyname] = iri
-        self._obj_properties[iri] = (prop, min_count, max_count, pyname)
-        self._obj_data[iri] = prop.init()
+        cls._OBJ_IRIS[pyname] = iri
+        cls._OBJ_PROPERTIES[iri] = (prop, min_count, max_count, pyname, compact)
 
     def __setattr__(self, name, value):
         if name.startswith("_obj_"):
@@ -477,7 +558,7 @@ class SHACLObject(object):
             name = "_id"
 
         try:
-            iri = self._obj_iris[name]
+            iri = self._OBJ_IRIS[name]
             self[iri] = value
         except KeyError:
             raise AttributeError(
@@ -492,13 +573,13 @@ class SHACLObject(object):
             return self._obj_metadata
 
         if name == "_IRI":
-            return self._obj_iris
+            return self._OBJ_IRIS
 
         if name == self.ID_ALIAS:
             name = "_id"
 
         try:
-            iri = self._obj_iris[name]
+            iri = self._OBJ_IRIS[name]
             return self[iri]
         except KeyError:
             raise AttributeError(
@@ -510,7 +591,7 @@ class SHACLObject(object):
             name = "_id"
 
         try:
-            iri = self._obj_iris[name]
+            iri = self._OBJ_IRIS[name]
             del self[iri]
         except KeyError:
             raise AttributeError(
@@ -518,48 +599,43 @@ class SHACLObject(object):
             )
 
     def __get_prop(self, iri):
-        if iri not in self._obj_properties:
+        if iri not in self._OBJ_PROPERTIES:
             raise KeyError(
                 f"'{iri}' is not a valid property of {self.__class__.__name__}"
             )
 
-        return self._obj_properties[iri]
+        return self._OBJ_PROPERTIES[iri]
 
     def __iter_props(self):
-        for iri, v in self._obj_properties.items():
-            prop, min_count, max_count, pyname = v
-            yield iri, prop, min_count, max_count, pyname
+        for iri, v in self._OBJ_PROPERTIES.items():
+            yield iri, *v
 
     def __getitem__(self, iri):
         return self._obj_data[iri]
 
     def __setitem__(self, iri, value):
         if iri == "@id":
-            if self.REFABLE == Refable.no:
-                raise ValueError(
-                    f"{self.__class__.__name__} ({id(self)}) is not referenceable. Property '{iri}' cannot be set to '{value}'"
-                )
-            elif self.REFABLE == Refable.local:
+            if self.NODE_KIND == NodeKind.BlankNode:
                 if not value.startswith("_:"):
                     raise ValueError(
                         f"{self.__class__.__name__} ({id(self)}) can only have local reference. Property '{iri}' cannot be set to '{value}' and must start with '_:'"
                     )
-            elif self.REFABLE in [Refable.yes, Refable.always]:
+            elif self.NODE_KIND == NodeKind.IRI:
                 if value.startswith("_:"):
                     raise ValueError(
-                        f"{self.__class__.__name__} ({id(self)}) can has mandatory reference. Property '{iri}' cannot be set to '{value}'"
+                        f"{self.__class__.__name__} ({id(self)}) can only have an IRI value. Property '{iri}' cannot be set to '{value}'"
                     )
 
-        prop, _, _, _ = self.__get_prop(iri)
+        prop, _, _, _, _ = self.__get_prop(iri)
         prop.validate(value)
         self._obj_data[iri] = prop.set(value)
 
     def __delitem__(self, iri):
-        prop, _, _, _ = self.__get_prop(iri)
+        prop, _, _, _, _ = self.__get_prop(iri)
         self._obj_data[iri] = prop.init()
 
     def __iter__(self):
-        return self._obj_properties.keys()
+        return self._OBJ_PROPERTIES.keys()
 
     def walk(self, callback, path=None):
         """
@@ -573,51 +649,38 @@ class SHACLObject(object):
             path = ["."]
 
         if callback(self, path):
-            for iri, prop, _, _, _ in self.__iter_props():
+            for iri, prop, _, _, _, _ in self.__iter_props():
                 prop.walk(self._obj_data[iri], callback, path + [f".{iri}"])
 
-    def child_objects(self):
+    def property_keys(self):
+        for iri, _, _, _, pyname, compact in self.__iter_props():
+            if iri == "@id":
+                compact = self.ID_ALIAS
+            yield pyname, iri, compact
+
+    def iter_objects(self, *, recursive=False, visited=None):
         """
-        Iterate over each object that is a child of this one
+        Iterate of all objects that are a child of this one
         """
-        seen = set()
+        if visited is None:
+            visited = set()
 
-        def _walk_callback(value, path):
-            nonlocal seen
+        for iri, prop, _, _, _, _ in self.__iter_props():
+            for c in prop.iter_objects(
+                self._obj_data[iri], recursive=recursive, visited=visited
+            ):
+                yield c
 
-            if not isinstance(value, SHACLObject):
-                return False
-
-            if value in seen:
-                return False
-
-            seen.add(value)
-            return True
-
-        self.walk(_walk_callback)
-
-        for obj in seen:
-            yield obj
-
-    def encode(self, encoder, state, *, is_reference=False):
-        idname = self.ID_ALIAS or self._obj_iris["_id"]
-        if not self._id and self.REFABLE in [Refable.yes, Refable.always]:
+    def encode(self, encoder, state):
+        idname = self.ID_ALIAS or self._OBJ_IRIS["_id"]
+        if not self._id and self.NODE_KIND == NodeKind.IRI:
             raise ValueError(
-                f"{self.__class__.__name__} ({id(self)}) must have a '{idname}' property to be referenceable"
+                f"{self.__class__.__name__} ({id(self)}) must have a IRI for property '{idname}'"
             )
 
         if state.is_written(self):
-            if self.REFABLE == Refable.no:
-                raise ValueError(
-                    f"{self.__class__.__name__} ({id(self)}) is not referenceable"
-                )
             encoder.write_iri(state.get_object_id(self))
             return
-
-        if is_reference and self.REFABLE == Refable.always:
-            raise ValueError(
-                f"{self.__class__.__name__} ({id(self)}) must always be referenced by name, and cannot be inlined"
-            )
 
         state.add_written(self)
 
@@ -626,7 +689,7 @@ class SHACLObject(object):
             state.get_object_id(self),
             bool(self._id) or state.is_refed(self),
         ) as obj_s:
-            for iri, prop, min_count, max_count, pyname in self.__iter_props():
+            for iri, prop, min_count, max_count, pyname, compact in self.__iter_props():
                 value = self._obj_data[iri]
                 if prop.elide(value):
                     if min_count:
@@ -647,14 +710,14 @@ class SHACLObject(object):
                             f"Property '{pyname}' in {self.__class__.__name__} ({id(self)}) requires a maximum of {max_count} elements"
                         )
 
-                if iri == self._obj_iris["_id"]:
+                if iri == self._OBJ_IRIS["_id"]:
                     continue
 
-                with obj_s.write_property(iri) as prop_s:
+                with obj_s.write_property(iri, compact) as prop_s:
                     prop.encode(prop_s, value, state)
 
     @classmethod
-    def decode(cls, decoder, *, object_ids=None):
+    def decode(cls, decoder, *, doc=None):
         typ, obj_d = decoder.read_object()
         if typ is None:
             raise TypeError("Unable to determine type for object")
@@ -665,50 +728,42 @@ class SHACLObject(object):
         obj = cls.DESERIALIZERS[typ]()
         _id = obj_d.read_object_id(obj.ID_ALIAS)
         if _id is not None:
-            if object_ids is not None:
-                if _id in object_ids:
-                    return object_ids[_id]
-                object_ids[_id] = obj
             obj._id = _id
+            if doc is not None:
+                v = doc.find_by_id(_id)
+                if v is not None:
+                    return v
 
-        for iri, prop, _, _, _ in obj.__iter_props():
-            if iri == obj._obj_iris["_id"]:
+        if doc is not None:
+            doc.add_index(obj)
+
+        for iri, prop, _, _, _, compact in obj.__iter_props():
+            if iri == obj._OBJ_IRIS["_id"]:
                 continue
 
-            with obj_d.read_property(iri) as prop_d:
+            with obj_d.read_property(iri, compact) as prop_d:
                 if prop_d is None:
                     continue
 
-                v = prop.decode(prop_d, object_ids=object_ids)
+                v = prop.decode(prop_d, doc=doc)
                 prop.validate(v)
                 obj._obj_data[iri] = v
 
         return obj
 
-    def link_helper(self, link_cache, missing, visited):
+    def link_helper(self, doc, missing, visited):
         if self in visited:
             return
 
         visited.add(self)
 
-        for iri, prop, _, _, _ in self.__iter_props():
+        for iri, prop, _, _, _, _ in self.__iter_props():
             self._obj_data[iri] = prop.link_prop(
                 self._obj_data[iri],
-                link_cache,
+                doc,
                 missing,
                 visited,
             )
-
-    def link(self, link_cache=None):
-        if not link_cache:
-            link_cache = {obj._id: obj for obj in self.child_objects() if obj._id}
-
-        missing = set()
-        visited = set()
-
-        self.link_helper(link_cache, missing, visited)
-
-        return missing
 
     def __str__(self):
         parts = [
@@ -739,9 +794,176 @@ class SHACLObject(object):
         return sort_key(self) < sort_key(other)
 
 
-def make_context():
-    global CONTEXTS
-    return Context(CONTEXTS)
+class SHACLDocument(object):
+    def __init__(self, objects=[], *, link=False):
+        self.objects = set()
+        for o in objects:
+            self.objects.add(o)
+        self.create_index()
+        if link:
+            self._link()
+
+    def create_index(self):
+        self.obj_by_id = {}
+        self.obj_by_type = {}
+        for o in self.foreach():
+            self.add_index(o)
+
+    def add_index(self, obj):
+        for typ in SHACLObject.DESERIALIZERS.values():
+            if isinstance(obj, typ):
+                self.obj_by_type.setdefault(typ, set()).add(obj)
+
+        if not obj._id:
+            return
+
+        if obj._id in self.obj_by_id:
+            return
+
+        self.obj_by_id[obj._id] = obj
+
+    def link(self):
+        self.create_index()
+        return self._link()
+
+    def _link(self):
+        missing = set()
+        visited = set()
+
+        new_objects = set()
+
+        for o in self.objects:
+            if o._id:
+                o = self.find_by_id(o._id, o)
+            o.link_helper(self, missing, visited)
+            new_objects.add(o)
+
+        self.objects = new_objects
+
+        # Remove blank nodes
+        obj_by_id = {}
+        for _id, obj in self.obj_by_id.items():
+            if _id.startswith("_:"):
+                del obj._id
+            else:
+                obj_by_id[obj._id] = obj
+        self.obj_by_id = obj_by_id
+
+        return missing
+
+    def find_by_id(self, _id, default=None):
+        if _id not in self.obj_by_id:
+            return default
+        return self.obj_by_id[_id]
+
+    def foreach(self):
+        visited = set()
+        for o in self.objects:
+            if o not in visited:
+                yield o
+                visited.add(o)
+
+            for child in o.iter_objects(recursive=True, visited=visited):
+                yield child
+
+    def foreach_type(self, typ, *, subclass=False):
+        if isinstance(typ, str):
+            typ = SHACLObject.DESERIALIZERS[typ]
+
+        if typ not in self.obj_by_type:
+            return
+
+        for o in self.obj_by_type[typ]:
+            if subclass or o.__class__ is typ:
+                yield o
+
+    def merge(self, *doc):
+        new_objects = set()
+        new_objects |= self.objects
+        for d in doc:
+            new_objects |= d.objects
+
+        return SHACLDocument(new_objects, link=True)
+
+    def encode(self, encoder, force_list=False):
+        """
+        Serialize a list of objects to a serialization encoder
+
+        If force_list is true, a list will always be written using the encoder.
+        """
+        ref_counts = {}
+        state = EncodeState()
+
+        def walk_callback(value, path):
+            nonlocal state
+            nonlocal ref_counts
+
+            if not isinstance(value, SHACLObject):
+                return True
+
+            # Remove blank node ID for re-assignment
+            if value._id and value._id.startswith("_:"):
+                del value._id
+
+            if value._id:
+                state.add_refed(value)
+
+            # If the object is referenced more than once, add it to the set of
+            # referenced objects
+            ref_counts.setdefault(value, 0)
+            ref_counts[value] += 1
+            if ref_counts[value] > 1:
+                state.add_refed(value)
+                return False
+
+            return True
+
+        for o in self.objects:
+            if o._id:
+                state.add_refed(o)
+            o.walk(walk_callback)
+
+        use_list = force_list or len(self.objects) > 1
+
+        if use_list:
+            # If we are making a list add all the objects referred to by reference
+            # to the list
+            objects = list(self.objects | state.ref_objects)
+        else:
+            objects = list(self.objects)
+
+        objects.sort()
+
+        if use_list:
+            # Ensure top level objects are only written in the top level graph
+            # node, and referenced by ID everywhere else. This is done by setting
+            # the flag that indicates this object has been written for all the top
+            # level objects, then clearing it right before serializing the object.
+            #
+            # In this way, if an object is referenced before it is supposed to be
+            # serialized into the @graph, it will serialize as a string instead of
+            # the actual object
+            for o in objects:
+                state.written_objects.add(o)
+
+            with encoder.write_list() as list_s:
+                for o in objects:
+                    # Allow this specific object to be written now
+                    state.written_objects.remove(o)
+                    with list_s.write_list_item() as item_s:
+                        o.encode(item_s, state)
+
+        else:
+            objects[0].encode(encoder, state)
+
+    def decode(self, decoder):
+        self.create_index()
+
+        for obj_d in decoder.read_list():
+            o = SHACLObject.decode(obj_d, doc=self)
+            self.objects.add(o)
+
+        self._link()
 
 
 class EncodeState(object):
@@ -773,145 +995,148 @@ class EncodeState(object):
         self.written_objects.add(o)
 
 
-def encode_objects(encoder, objects, force_list=False):
-    """
-    Serialize a list of objects to a serialization encoder
-
-    If force_list is true, a list will always be written using the encoder.
-    """
-    ref_counts = {}
-    state = EncodeState()
-
-    def walk_callback(value, path):
-        nonlocal state
-        nonlocal ref_counts
-
-        if not isinstance(value, SHACLObject):
-            return True
-
-        # Remove blank node ID for re-assignment
-        if value._id and value._id.startswith("_:"):
-            del value._id
-
-        if value._id or value.REFABLE == Refable.always:
-            state.add_refed(value)
-
-        # If the object is referenced more than once, add it to the set of
-        # referenced objects
-        ref_counts.setdefault(value, 0)
-        ref_counts[value] += 1
-        if ref_counts[value] > 1:
-            state.add_refed(value)
-            return False
-
-        return True
-
-    for o in objects:
-        o.walk(walk_callback)
-
-    use_list = force_list or len(objects) > 1
-
-    objects = set(objects)
-
-    if use_list:
-        # If we are making a list add all the objects referred to by reference
-        # to the list
-        objects |= state.ref_objects
-
-    objects = list(objects)
-    objects.sort()
-
-    if use_list:
-        # Ensure top level objects are only written in the top level graph
-        # node, and referenced by ID everywhere else. This is done by setting
-        # the flag that indicates this object has been written for all the top
-        # level objects, then clearing it right before serializing the object.
-        #
-        # In this way, if an object is referenced before it is supposed to be
-        # serialized into the @graph, it will serialize as a string instead of
-        # the actual object
-        for o in objects:
-            state.written_objects.add(o)
-
-        with encoder.write_list() as list_s:
-            for o in objects:
-                # Allow this specific object to be written now
-                state.written_objects.remove(o)
-                with list_s.write_list_item() as item_s:
-                    o.encode(item_s, state)
-
-    else:
-        objects[0].encode(encoder, state)
-
-
-def decode_objects(decoder):
-    object_ids = {}
-    objects = [
-        SHACLObject.decode(obj_d, object_ids=object_ids)
-        for obj_d in decoder.read_list()
-    ]
-
-    for o in objects:
-        o.link(object_ids)
-
-    # Remove blank node IDs
-    for o in objects:
-        for c in o.child_objects():
-            if c._id and c._id.startswith("_:"):
-                del c._id
-
-    object_ids = {k: v for k, v in object_ids.items() if not k.startswith("_:")}
-
-    return objects, object_ids
-
-
 class Decoder(ABC):
     @abstractmethod
     def read_string(self):
+        """
+        Consume the next item as a string.
+
+        Returns the string value of the next item, or `None` if the next item
+        is not a string
+        """
+        pass
+
+    @abstractmethod
+    def read_datetime(self):
+        """
+        Consumes the next item as a date & time string
+
+        Returns the string value of the next item, if it is a ISO datetime, or
+        `None` if the next item is not a ISO datetime string.
+
+        Note that validation of the string is done by the caller, so a minimal
+        implementation can just check if the next item is a string without
+        worrying about the format
+        """
         pass
 
     @abstractmethod
     def read_integer(self):
+        """
+        Consumes the next item as an integer
+
+        Returns the integer value of the next item, or `None` if the next item
+        is not an integer
+        """
         pass
 
     @abstractmethod
     def read_iri(self):
+        """
+        Consumes the next item as an IRI string
+
+        Returns the string value of the next item an IRI, or `None` if the next
+        item is not an IRI.
+
+        The returned string should be either a fully-qualified IRI, or a blank
+        node ID
+        """
         pass
 
     @abstractmethod
     def read_enum(self, e):
+        """
+        Consumes the next item as an Enum value string
+
+        Returns the fully qualified IRI of the next enum item, or `None` if the
+        next item is not an enum value.
+
+        The callee is responsible for validating that the returned IRI is
+        actually a member of the specified Enum, so the `Decoder` does not need
+        to check that, but can if it wishes
+        """
         pass
 
     @abstractmethod
     def read_bool(self):
+        """
+        Consume the next item as a boolean value
+
+        Returns the boolean value of the next item, or `None` if the next item
+        is not a boolean
+        """
         pass
 
     @abstractmethod
     def read_float(self):
+        """
+        Consume the next item as a float value
+
+        Returns the float value of the next item, or `None` if the next item is
+        not a float
+        """
         pass
 
     @abstractmethod
     def read_list(self):
-        pass
+        """
+        Consume the next item as a list generator
 
-    @abstractmethod
-    @contextmanager
-    def read_property(self, iri):
+        This should generate a `Decoder` object for each item in the list. The
+        generated `Decoder` can be used to read the corresponding item from the
+        list
+        """
         pass
 
     @abstractmethod
     def read_object(self):
+        """
+        Consume next item as an object
+
+        A context manager that "enters" the next item as a object and yields a
+        `Decoder` that can read properties from it. If the next item is not an
+        object, yields `None`
+
+        Properties will be read out of the object using `read_property` and
+        `read_object_id`
+        """
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def read_property(self, iri, compact=None):
+        """
+        Read property from object
+
+        A context manager that yields a `Decoder` that can be used to read the
+        value of the property with the given IRI in the current object, or
+        `None` if the property does not exist in the current object.
+
+        Note that the provided IRI will be fully qualified. If `compact` is
+        provided and the serialization supports compacted IRIs, it should be
+        preferred to the full IRI.
+        """
         pass
 
     @abstractmethod
     def read_object_id(self, alias=None):
+        """
+        Read current object ID property
+
+        Returns the ID of the current object if one is defined, or `None` if
+        the current object has no ID.
+
+        The ID must be a fully qualified IRI or a blank node
+
+        If `alias` is provided, is is a hint as to another name by which the ID
+        might be found, if the `Decoder` supports aliases for an ID
+        """
         pass
 
 
 class JSONLDDecoder(Decoder):
-    def __init__(self, data, context):
+    def __init__(self, data):
         self.data = data
-        self.context = context
 
     def read_string(self):
         if isinstance(self.data, str):
@@ -919,9 +1144,7 @@ class JSONLDDecoder(Decoder):
         return None
 
     def read_datetime(self):
-        if isinstance(self.data, str):
-            return DateTimeProp.from_string(self.data)
-        return None
+        return self.read_string()
 
     def read_integer(self):
         if isinstance(self.data, int):
@@ -940,133 +1163,208 @@ class JSONLDDecoder(Decoder):
 
     def read_iri(self):
         if isinstance(self.data, str):
-            return self.context.expand(self.data)
+            return self.data
         return None
 
     def read_enum(self, e):
         if isinstance(self.data, str):
-            return self.context.expand_vocab(self.data)
+            return self.data
         return None
 
     def read_list(self):
         if isinstance(self.data, (list, tuple, set)):
             for v in self.data:
-                yield self.__class__(v, self.context)
+                yield self.__class__(v)
         else:
             yield self
 
-    @contextmanager
-    def read_property(self, iri):
-        for k in (iri, self.context.compact_vocab(iri)):
-            if k in self.data:
-                with self.context.vocab_push(iri):
-                    yield self.__class__(self.data[k], self.context)
-                return
+    def __get_value(self, *keys):
+        for k in keys:
+            if k and k in self.data:
+                return self.data[k]
+        return None
 
-        yield None
+    @contextmanager
+    def read_property(self, iri, compact=None):
+        v = self.__get_value(compact, iri)
+        if v is not None:
+            yield self.__class__(v)
+        else:
+            yield None
 
     def read_object(self):
-        for k in ("@type", self.context.compact("@type")):
-            if k not in self.data:
-                continue
-
-            typ = self.context.expand(self.data[k])
+        typ = self.__get_value("@type", "type")
+        if typ is not None:
             return typ, self
 
         return None, self
 
     def read_object_id(self, alias=None):
-        if alias and alias in self.data:
-            return self.data[alias]
-
-        for k in ("@id", self.context.compact("@id")):
-            if k in self.data:
-                return self.data[k]
-
-        return None
+        return self.__get_value(alias, "@id")
 
 
 class JSONLDDeserializer(object):
-    def read(self, f):
-        context = make_context()
+    def read(self, f, doc):
         data = json.load(f)
         if "@graph" in data:
-            h = JSONLDDecoder(data["@graph"], context)
+            h = JSONLDDecoder(data["@graph"])
         else:
-            h = JSONLDDecoder(data, context)
+            h = JSONLDDecoder(data)
 
-        return decode_objects(h)
+        doc.decode(h)
 
 
 class Encoder(ABC):
     @abstractmethod
     def write_string(self, v):
+        """
+        Write a string value
+
+        Encodes the value as a string in the output
+        """
         pass
 
     @abstractmethod
     def write_datetime(self, v):
+        """
+        Write a date & time string
+
+        Encodes the value as an ISO datetime string
+
+        Note: The provided string is already correctly encoded as an ISO datetime
+        """
         pass
 
     @abstractmethod
     def write_integer(self, v):
+        """
+        Write an integer value
+
+        Encodes the value as an integer in the output
+        """
         pass
 
     @abstractmethod
-    def write_iri(self, v):
+    def write_iri(self, v, compact=None):
+        """
+        Write IRI
+
+        Encodes the string as an IRI. Note that the string will be either a
+        fully qualified IRI or a blank node ID. If `compact` is provided and
+        the serialization supports compacted IRIs, it should be preferred to
+        the full IRI
+        """
         pass
 
     @abstractmethod
-    def write_enum(self, v, e):
+    def write_enum(self, v, e, compact=None):
+        """
+        Write enum value IRI
+
+        Encodes the string enum value IRI. Note that the string will be a fully
+        qualified IRI. If `compact` is provided and the serialization supports
+        compacted IRIs, it should be preferred to the full IRI.
+        """
         pass
 
     @abstractmethod
     def write_bool(self, v):
+        """
+        Write boolean
+
+        Encodes the value as a boolean in the output
+        """
         pass
 
     @abstractmethod
     def write_float(self, v):
-        pass
+        """
+        Write float
 
-    @abstractmethod
-    @contextmanager
-    def write_property(self, iri):
+        Encodes the value as a floating point number in the output
+        """
         pass
 
     @abstractmethod
     @contextmanager
     def write_object(self, o, _id, needs_id):
+        """
+        Write object
+
+        A context manager that yields an `Encoder` that can be used to encode
+        the given object properties.
+
+        The provided ID will always be a valid ID (even if o._id is `None`), in
+        case the `Encoder` _must_ have an ID. `needs_id` is a hint to indicate
+        to the `Encoder` if an ID must be written or not (if that is even an
+        option). If it is `True`, the `Encoder` must encode an ID for the
+        object. If `False`, the encoder is not required to encode an ID and may
+        omit it.
+
+        The ID will be either a fully qualified IRI, or a blank node IRI.
+
+        Properties will be written the object using `write_property`
+        """
+        pass
+
+    @abstractmethod
+    @contextmanager
+    def write_property(self, iri, compact=None):
+        """
+        Write object property
+
+        A context manager that yields an `Encoder` that can be used to encode
+        the value for the property with the given IRI in the current object
+
+        Note that the IRI will be fully qualified. If `compact` is provided and
+        the serialization supports compacted IRIs, it should be preferred to
+        the full IRI.
+        """
         pass
 
     @abstractmethod
     @contextmanager
     def write_list(self):
+        """
+        Write list
+
+        A context manager that yields an `Encoder` that can be used to encode a
+        list.
+
+        Each item of the list will be added using `write_list_item`
+        """
         pass
 
     @abstractmethod
     @contextmanager
     def write_list_item(self):
+        """
+        Write list item
+
+        A context manager that yields an `Encoder` that can be used to encode
+        the value for a list item
+        """
         pass
 
 
 class JSONLDEncoder(Encoder):
-    def __init__(self, context, data=None):
+    def __init__(self, data=None):
         self.data = data
-        self.context = context
 
     def write_string(self, v):
         self.data = v
 
     def write_datetime(self, v):
-        self.data = DateTimeProp.to_string(v)
+        self.data = v
 
     def write_integer(self, v):
         self.data = v
 
-    def write_iri(self, v):
-        self.write_string(self.context.compact(v))
+    def write_iri(self, v, compact=None):
+        self.write_string(compact or v)
 
-    def write_enum(self, v, e):
-        self.write_string(self.context.compact_vocab(v))
+    def write_enum(self, v, e, compact=None):
+        self.write_string(compact or v)
 
     def write_bool(self, v):
         self.data = v
@@ -1075,22 +1373,19 @@ class JSONLDEncoder(Encoder):
         self.data = str(v)
 
     @contextmanager
-    def write_property(self, iri):
-        s = self.__class__(self.context, None)
-        with self.context.vocab_push(iri):
-            yield s
+    def write_property(self, iri, compact=None):
+        s = self.__class__(None)
+        yield s
         if s.data is not None:
-            self.data[self.context.compact_vocab(iri)] = s.data
+            self.data[compact or iri] = s.data
 
     @contextmanager
     def write_object(self, o, _id, needs_id):
         self.data = {
-            self.context.compact("@type"): self.context.compact_vocab(o.TYPE),
+            "type": o.COMPACT_TYPE or o.TYPE,
         }
         if needs_id:
-            self.data[o.ID_ALIAS or self.context.compact("@id")] = self.context.compact(
-                _id
-            )
+            self.data[o.ID_ALIAS or "@id"] = _id
         yield self
 
     @contextmanager
@@ -1102,41 +1397,45 @@ class JSONLDEncoder(Encoder):
 
     @contextmanager
     def write_list_item(self):
-        s = self.__class__(self.context, None)
+        s = self.__class__(None)
         yield s
         if s.data is not None:
             self.data.append(s.data)
 
 
 class JSONLDSerializer(object):
-    def serialize_data(self, objects, force_graph=False):
-        context = make_context()
-        h = JSONLDEncoder(context)
-        encode_objects(h, objects, force_graph)
-        if isinstance(h.data, list):
-            data = {
-                "@graph": h.data,
-            }
-        else:
-            data = h.data
+    def __init__(self, **args):
+        self.args = args
 
+    def serialize_data(self, doc, force_graph=False):
+        h = JSONLDEncoder()
+        doc.encode(h, force_graph)
+        data = {}
         if len(CONTEXT_URLS) == 1:
             data["@context"] = CONTEXT_URLS[0]
         elif CONTEXT_URLS:
             data["@context"] = CONTEXT_URLS
 
+        if isinstance(h.data, list):
+            data["@graph"] = h.data
+        else:
+            for k, v in h.data.items():
+                data[k] = v
+
         return data
 
-    def write(self, objects, f, force_graph=False, **kwargs):
+    def write(self, doc, f, force_graph=False, **kwargs):
         """
-        Write a list of objects to a JSON LD file
+        Write a SHACLDocument to a JSON LD file
 
         If force_graph is True, a @graph node will always be written
         """
-        data = self.serialize_data(objects, force_graph)
+        data = self.serialize_data(doc, force_graph)
+
+        args = {**self.args, **kwargs}
 
         sha1 = hashlib.sha1()
-        for chunk in json.JSONEncoder(**kwargs).iterencode(data):
+        for chunk in json.JSONEncoder(**args).iterencode(data):
             chunk = chunk.encode("utf-8")
             f.write(chunk)
             sha1.update(chunk)
@@ -1145,9 +1444,8 @@ class JSONLDSerializer(object):
 
 
 class JSONLDInlineEncoder(Encoder):
-    def __init__(self, f, context, sha1):
+    def __init__(self, f, sha1):
         self.f = f
-        self.context = context
         self.comma = False
         self.sha1 = sha1
 
@@ -1161,23 +1459,20 @@ class JSONLDInlineEncoder(Encoder):
             self.write(",")
             self.comma = False
 
-    def _need_comma(self):
-        self.comma = True
-
     def write_string(self, v):
-        self.write(f'"{v}"')
+        self.write(json.dumps(v))
 
     def write_datetime(self, v):
-        self.write('"' + DateTimeProp.to_string(v) + '"')
+        self.write_string(v)
 
     def write_integer(self, v):
         self.write(f"{v}")
 
-    def write_iri(self, v):
-        self.write_string(self.context.compact(v))
+    def write_iri(self, v, compact=None):
+        self.write_string(compact or v)
 
-    def write_enum(self, v, e):
-        self.write_iri(v)
+    def write_enum(self, v, e, compact=None):
+        self.write_iri(v, compact)
 
     def write_bool(self, v):
         if v:
@@ -1186,29 +1481,32 @@ class JSONLDInlineEncoder(Encoder):
             self.write("false")
 
     def write_float(self, v):
-        self.write(f'"{v}"')
+        self.write(json.dumps(str(v)))
 
     @contextmanager
-    def write_property(self, iri):
+    def write_property(self, iri, compact=None):
         self._write_comma()
-        p = self.context.compact(iri)
-        self.write(f'"{p}":')
-        with self.context.vocab_push(iri):
-            yield self
+        self.write_string(compact or iri)
+        self.write(":")
+        yield self
         self.comma = True
 
     @contextmanager
     def write_object(self, o, _id, needs_id):
         self._write_comma()
 
-        typname = self.context.compact("@type")
-        typval = self.context.compact_vocab(o.TYPE)
         self.write("{")
+        self.write_string("type")
+        self.write(":")
+        self.write_string(o.COMPACT_TYPE or o.TYPE)
+        self.comma = True
+
         if needs_id:
-            idname = o.ID_ALIAS or self.context.compact("@id")
-            idval = self.context.compact(_id)
-            self.write(f'"{idname}": "{idval}",')
-        self.write(f'"{typname}":"{typval}"')
+            self._write_comma()
+            self.write_string(o.ID_ALIAS or "@id")
+            self.write(":")
+            self.write_string(_id)
+            self.comma = True
 
         self.comma = True
         yield self
@@ -1220,24 +1518,27 @@ class JSONLDInlineEncoder(Encoder):
     def write_list(self):
         self._write_comma()
         self.write("[")
-        yield self.__class__(self.f, self.context, self.sha1)
+        yield self.__class__(self.f, self.sha1)
         self.write("]")
         self.comma = True
 
     @contextmanager
     def write_list_item(self):
         self._write_comma()
-        yield self.__class__(self.f, self.context, self.sha1)
+        yield self.__class__(self.f, self.sha1)
         self.comma = True
 
 
 class JSONLDInlineSerializer(object):
-    def write(self, objects, f):
+    def write(self, doc, f, force_graph=False):
         """
-        Write a list of objects to a JSON LD file
+        Write a SHACLDocument to a JSON LD file
+
+        Note: force_graph is included for compatibility, but ignored. This
+        serializer always writes out a graph
         """
         sha1 = hashlib.sha1()
-        h = JSONLDInlineEncoder(f, make_context(), sha1)
+        h = JSONLDInlineEncoder(f, sha1)
         h.write('{"@context":')
         if len(CONTEXT_URLS) == 1:
             h.write(f'"{CONTEXT_URLS[0]}"')
@@ -1249,7 +1550,7 @@ class JSONLDInlineSerializer(object):
 
         h.write('"@graph":')
 
-        encode_objects(h, objects, True)
+        doc.encode(h, True)
         h.write("}")
         return sha1.hexdigest()
 
@@ -1293,764 +1594,6 @@ def print_tree(objects, all_fields=False):
 # fmt: off
 """Format Guard"""
 
-CONTEXTS = [
-    {
-        "Agent": "https://rdf.spdx.org/v3/Core/Agent",
-        "Annotation": "https://rdf.spdx.org/v3/Core/Annotation",
-        "AnnotationType": "https://rdf.spdx.org/v3/Core/AnnotationType",
-        "Artifact": "https://rdf.spdx.org/v3/Core/Artifact",
-        "Bom": "https://rdf.spdx.org/v3/Core/Bom",
-        "Bundle": "https://rdf.spdx.org/v3/Core/Bundle",
-        "CreationInfo": "https://rdf.spdx.org/v3/Core/CreationInfo",
-        "DictionaryEntry": "https://rdf.spdx.org/v3/Core/DictionaryEntry",
-        "Element": "https://rdf.spdx.org/v3/Core/Element",
-        "ElementCollection": "https://rdf.spdx.org/v3/Core/ElementCollection",
-        "ExternalIdentifier": "https://rdf.spdx.org/v3/Core/ExternalIdentifier",
-        "ExternalIdentifierType": "https://rdf.spdx.org/v3/Core/ExternalIdentifierType",
-        "ExternalMap": "https://rdf.spdx.org/v3/Core/ExternalMap",
-        "ExternalRef": "https://rdf.spdx.org/v3/Core/ExternalRef",
-        "ExternalRefType": "https://rdf.spdx.org/v3/Core/ExternalRefType",
-        "Hash": "https://rdf.spdx.org/v3/Core/Hash",
-        "HashAlgorithm": "https://rdf.spdx.org/v3/Core/HashAlgorithm",
-        "IntegrityMethod": "https://rdf.spdx.org/v3/Core/IntegrityMethod",
-        "LifecycleScopeType": "https://rdf.spdx.org/v3/Core/LifecycleScopeType",
-        "LifecycleScopedRelationship": "https://rdf.spdx.org/v3/Core/LifecycleScopedRelationship",
-        "NamespaceMap": "https://rdf.spdx.org/v3/Core/NamespaceMap",
-        "Organization": "https://rdf.spdx.org/v3/Core/Organization",
-        "PackageVerificationCode": "https://rdf.spdx.org/v3/Core/PackageVerificationCode",
-        "Person": "https://rdf.spdx.org/v3/Core/Person",
-        "PositiveIntegerRange": "https://rdf.spdx.org/v3/Core/PositiveIntegerRange",
-        "PresenceType": "https://rdf.spdx.org/v3/Core/PresenceType",
-        "ProfileIdentifierType": "https://rdf.spdx.org/v3/Core/ProfileIdentifierType",
-        "Relationship": "https://rdf.spdx.org/v3/Core/Relationship",
-        "RelationshipCompleteness": "https://rdf.spdx.org/v3/Core/RelationshipCompleteness",
-        "RelationshipType": "https://rdf.spdx.org/v3/Core/RelationshipType",
-        "SoftwareAgent": "https://rdf.spdx.org/v3/Core/SoftwareAgent",
-        "SpdxDocument": "https://rdf.spdx.org/v3/Core/SpdxDocument",
-        "SupportType": "https://rdf.spdx.org/v3/Core/SupportType",
-        "Tool": "https://rdf.spdx.org/v3/Core/Tool",
-        "ai_AIPackage": "https://rdf.spdx.org/v3/AI/AIPackage",
-        "ai_SafetyRiskAssessmentType": "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType",
-        "ai_autonomyType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/AI/autonomyType",
-            "@type": "@vocab",
-        },
-        "ai_domain" : {
-            "@id": "https://rdf.spdx.org/v3/AI/domain",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_energyConsumption" : {
-            "@id": "https://rdf.spdx.org/v3/AI/energyConsumption",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_hyperparameter" : {
-            "@id": "https://rdf.spdx.org/v3/AI/hyperparameter",
-            "@type": "@id",
-        },
-        "ai_informationAboutApplication" : {
-            "@id": "https://rdf.spdx.org/v3/AI/informationAboutApplication",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_informationAboutTraining" : {
-            "@id": "https://rdf.spdx.org/v3/AI/informationAboutTraining",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_limitation" : {
-            "@id": "https://rdf.spdx.org/v3/AI/limitation",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_metric" : {
-            "@id": "https://rdf.spdx.org/v3/AI/metric",
-            "@type": "@id",
-        },
-        "ai_metricDecisionThreshold" : {
-            "@id": "https://rdf.spdx.org/v3/AI/metricDecisionThreshold",
-            "@type": "@id",
-        },
-        "ai_modelDataPreprocessing" : {
-            "@id": "https://rdf.spdx.org/v3/AI/modelDataPreprocessing",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_modelExplainability" : {
-            "@id": "https://rdf.spdx.org/v3/AI/modelExplainability",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_safetyRiskAssessment" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/AI/safetyRiskAssessment",
-            "@type": "@vocab",
-        },
-        "ai_sensitivePersonalInformation" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/AI/sensitivePersonalInformation",
-            "@type": "@vocab",
-        },
-        "ai_standardCompliance" : {
-            "@id": "https://rdf.spdx.org/v3/AI/standardCompliance",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "ai_typeOfModel" : {
-            "@id": "https://rdf.spdx.org/v3/AI/typeOfModel",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "algorithm" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/HashAlgorithm/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/algorithm",
-            "@type": "@vocab",
-        },
-        "annotationType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/AnnotationType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/annotationType",
-            "@type": "@vocab",
-        },
-        "beginIntegerRange" : {
-            "@id": "https://rdf.spdx.org/v3/Core/beginIntegerRange",
-            "@type": "http://www.w3.org/2001/XMLSchema#positiveInteger",
-        },
-        "build_Build": "https://rdf.spdx.org/v3/Build/Build",
-        "build_buildEndTime" : {
-            "@id": "https://rdf.spdx.org/v3/Build/buildEndTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "build_buildId" : {
-            "@id": "https://rdf.spdx.org/v3/Build/buildId",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "build_buildStartTime" : {
-            "@id": "https://rdf.spdx.org/v3/Build/buildStartTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "build_buildType" : {
-            "@id": "https://rdf.spdx.org/v3/Build/buildType",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "build_configSourceDigest" : {
-            "@id": "https://rdf.spdx.org/v3/Build/configSourceDigest",
-            "@type": "@id",
-        },
-        "build_configSourceEntrypoint" : {
-            "@id": "https://rdf.spdx.org/v3/Build/configSourceEntrypoint",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "build_configSourceUri" : {
-            "@id": "https://rdf.spdx.org/v3/Build/configSourceUri",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "build_environment" : {
-            "@id": "https://rdf.spdx.org/v3/Build/environment",
-            "@type": "@id",
-        },
-        "build_parameters" : {
-            "@id": "https://rdf.spdx.org/v3/Build/parameters",
-            "@type": "@id",
-        },
-        "builtTime" : {
-            "@id": "https://rdf.spdx.org/v3/Core/builtTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "comment" : {
-            "@id": "https://rdf.spdx.org/v3/Core/comment",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "completeness" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/RelationshipCompleteness/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/completeness",
-            "@type": "@vocab",
-        },
-        "contentType" : {
-            "@id": "https://rdf.spdx.org/v3/Core/contentType",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "context" : {
-            "@id": "https://rdf.spdx.org/v3/Core/context",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "created" : {
-            "@id": "https://rdf.spdx.org/v3/Core/created",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "createdBy" : {
-            "@id": "https://rdf.spdx.org/v3/Core/createdBy",
-            "@type": "@id",
-        },
-        "createdUsing" : {
-            "@id": "https://rdf.spdx.org/v3/Core/createdUsing",
-            "@type": "@id",
-        },
-        "creationInfo" : {
-            "@id": "https://rdf.spdx.org/v3/Core/creationInfo",
-            "@type": "@id",
-        },
-        "dataLicense" : {
-            "@id": "https://rdf.spdx.org/v3/Core/dataLicense",
-            "@type": "@id",
-        },
-        "dataset_ConfidentialityLevelType": "https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType",
-        "dataset_Dataset": "https://rdf.spdx.org/v3/Dataset/Dataset",
-        "dataset_DatasetAvailabilityType": "https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType",
-        "dataset_DatasetType": "https://rdf.spdx.org/v3/Dataset/DatasetType",
-        "dataset_anonymizationMethodUsed" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_confidentialityLevel" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Dataset/confidentialityLevel",
-            "@type": "@vocab",
-        },
-        "dataset_dataCollectionProcess" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/dataCollectionProcess",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_dataPreprocessing" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/dataPreprocessing",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_datasetAvailability" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Dataset/datasetAvailability",
-            "@type": "@vocab",
-        },
-        "dataset_datasetNoise" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/datasetNoise",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_datasetSize" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/datasetSize",
-            "@type": "http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
-        },
-        "dataset_datasetType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Dataset/DatasetType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Dataset/datasetType",
-            "@type": "@vocab",
-        },
-        "dataset_datasetUpdateMechanism" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_intendedUse" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/intendedUse",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_knownBias" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/knownBias",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "dataset_sensitivePersonalInformation" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Dataset/sensitivePersonalInformation",
-            "@type": "@vocab",
-        },
-        "dataset_sensor" : {
-            "@id": "https://rdf.spdx.org/v3/Dataset/sensor",
-            "@type": "@id",
-        },
-        "definingArtifact" : {
-            "@id": "https://rdf.spdx.org/v3/Core/definingArtifact",
-            "@type": "@id",
-        },
-        "description" : {
-            "@id": "https://rdf.spdx.org/v3/Core/description",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "element" : {
-            "@id": "https://rdf.spdx.org/v3/Core/element",
-            "@type": "@id",
-        },
-        "endIntegerRange" : {
-            "@id": "https://rdf.spdx.org/v3/Core/endIntegerRange",
-            "@type": "http://www.w3.org/2001/XMLSchema#positiveInteger",
-        },
-        "endTime" : {
-            "@id": "https://rdf.spdx.org/v3/Core/endTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "expandedlicensing_ConjunctiveLicenseSet": "https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet",
-        "expandedlicensing_CustomLicense": "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense",
-        "expandedlicensing_CustomLicenseAddition": "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicenseAddition",
-        "expandedlicensing_DisjunctiveLicenseSet": "https://rdf.spdx.org/v3/ExpandedLicensing/DisjunctiveLicenseSet",
-        "expandedlicensing_ExtendableLicense": "https://rdf.spdx.org/v3/ExpandedLicensing/ExtendableLicense",
-        "expandedlicensing_IndividualLicensingInfo": "https://rdf.spdx.org/v3/ExpandedLicensing/IndividualLicensingInfo",
-        "expandedlicensing_License": "https://rdf.spdx.org/v3/ExpandedLicensing/License",
-        "expandedlicensing_LicenseAddition": "https://rdf.spdx.org/v3/ExpandedLicensing/LicenseAddition",
-        "expandedlicensing_ListedLicense": "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicense",
-        "expandedlicensing_ListedLicenseException": "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicenseException",
-        "expandedlicensing_OrLaterOperator": "https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOperator",
-        "expandedlicensing_WithAdditionOperator": "https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditionOperator",
-        "expandedlicensing_additionText" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/additionText",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_deprecatedVersion" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_isDeprecatedAdditionId" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedAdditionId",
-            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
-        },
-        "expandedlicensing_isDeprecatedLicenseId" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedLicenseId",
-            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
-        },
-        "expandedlicensing_isFsfLibre" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isFsfLibre",
-            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
-        },
-        "expandedlicensing_isOsiApproved" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/isOsiApproved",
-            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
-        },
-        "expandedlicensing_licenseXml" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_listVersionAdded" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_member" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/member",
-            "@type": "@id",
-        },
-        "expandedlicensing_obsoletedBy" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_seeAlso" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "expandedlicensing_standardAdditionTemplate" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/standardAdditionTemplate",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_standardLicenseHeader" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseHeader",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_standardLicenseTemplate" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseTemplate",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "expandedlicensing_subjectAddition" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/subjectAddition",
-            "@type": "@id",
-        },
-        "expandedlicensing_subjectExtendableLicense" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/subjectExtendableLicense",
-            "@type": "@id",
-        },
-        "expandedlicensing_subjectLicense" : {
-            "@id": "https://rdf.spdx.org/v3/ExpandedLicensing/subjectLicense",
-            "@type": "@id",
-        },
-        "extension" : {
-            "@id": "https://rdf.spdx.org/v3/Core/extension",
-            "@type": "@id",
-        },
-        "extension_Extension": "https://rdf.spdx.org/v3/Extension/Extension",
-        "externalIdentifier" : {
-            "@id": "https://rdf.spdx.org/v3/Core/externalIdentifier",
-            "@type": "@id",
-        },
-        "externalIdentifierType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/ExternalIdentifierType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/externalIdentifierType",
-            "@type": "@vocab",
-        },
-        "externalRef" : {
-            "@id": "https://rdf.spdx.org/v3/Core/externalRef",
-            "@type": "@id",
-        },
-        "externalRefType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/ExternalRefType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/externalRefType",
-            "@type": "@vocab",
-        },
-        "externalSpdxId" : {
-            "@id": "https://rdf.spdx.org/v3/Core/externalSpdxId",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "from" : {
-            "@id": "https://rdf.spdx.org/v3/Core/from",
-            "@type": "@id",
-        },
-        "hashValue" : {
-            "@id": "https://rdf.spdx.org/v3/Core/hashValue",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "id": "@id",
-        "identifier" : {
-            "@id": "https://rdf.spdx.org/v3/Core/identifier",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "identifierLocator" : {
-            "@id": "https://rdf.spdx.org/v3/Core/identifierLocator",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "imports" : {
-            "@id": "https://rdf.spdx.org/v3/Core/imports",
-            "@type": "@id",
-        },
-        "issuingAuthority" : {
-            "@id": "https://rdf.spdx.org/v3/Core/issuingAuthority",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "key" : {
-            "@id": "https://rdf.spdx.org/v3/Core/key",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "locationHint" : {
-            "@id": "https://rdf.spdx.org/v3/Core/locationHint",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "locator" : {
-            "@id": "https://rdf.spdx.org/v3/Core/locator",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "name" : {
-            "@id": "https://rdf.spdx.org/v3/Core/name",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "namespace" : {
-            "@id": "https://rdf.spdx.org/v3/Core/namespace",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "namespaceMap" : {
-            "@id": "https://rdf.spdx.org/v3/Core/namespaceMap",
-            "@type": "@id",
-        },
-        "originatedBy" : {
-            "@id": "https://rdf.spdx.org/v3/Core/originatedBy",
-            "@type": "@id",
-        },
-        "packageVerificationCodeExcludedFile" : {
-            "@id": "https://rdf.spdx.org/v3/Core/packageVerificationCodeExcludedFile",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "prefix" : {
-            "@id": "https://rdf.spdx.org/v3/Core/prefix",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "profileConformance" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/ProfileIdentifierType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/profileConformance",
-            "@type": "@vocab",
-        },
-        "relationshipType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/RelationshipType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/relationshipType",
-            "@type": "@vocab",
-        },
-        "releaseTime" : {
-            "@id": "https://rdf.spdx.org/v3/Core/releaseTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "rootElement" : {
-            "@id": "https://rdf.spdx.org/v3/Core/rootElement",
-            "@type": "@id",
-        },
-        "scope" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/LifecycleScopeType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/scope",
-            "@type": "@vocab",
-        },
-        "security_CvssSeverityType": "https://rdf.spdx.org/v3/Security/CvssSeverityType",
-        "security_CvssV2VulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/CvssV2VulnAssessmentRelationship",
-        "security_CvssV3VulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/CvssV3VulnAssessmentRelationship",
-        "security_CvssV4VulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/CvssV4VulnAssessmentRelationship",
-        "security_EpssVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/EpssVulnAssessmentRelationship",
-        "security_ExploitCatalogType": "https://rdf.spdx.org/v3/Security/ExploitCatalogType",
-        "security_ExploitCatalogVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/ExploitCatalogVulnAssessmentRelationship",
-        "security_SsvcDecisionType": "https://rdf.spdx.org/v3/Security/SsvcDecisionType",
-        "security_SsvcVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/SsvcVulnAssessmentRelationship",
-        "security_VexAffectedVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VexAffectedVulnAssessmentRelationship",
-        "security_VexFixedVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VexFixedVulnAssessmentRelationship",
-        "security_VexJustificationType": "https://rdf.spdx.org/v3/Security/VexJustificationType",
-        "security_VexNotAffectedVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VexNotAffectedVulnAssessmentRelationship",
-        "security_VexUnderInvestigationVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VexUnderInvestigationVulnAssessmentRelationship",
-        "security_VexVulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VexVulnAssessmentRelationship",
-        "security_VulnAssessmentRelationship": "https://rdf.spdx.org/v3/Security/VulnAssessmentRelationship",
-        "security_Vulnerability": "https://rdf.spdx.org/v3/Security/Vulnerability",
-        "security_actionStatement" : {
-            "@id": "https://rdf.spdx.org/v3/Security/actionStatement",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "security_actionStatementTime" : {
-            "@id": "https://rdf.spdx.org/v3/Security/actionStatementTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "security_assessedElement" : {
-            "@id": "https://rdf.spdx.org/v3/Security/assessedElement",
-            "@type": "@id",
-        },
-        "security_catalogType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Security/ExploitCatalogType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Security/catalogType",
-            "@type": "@vocab",
-        },
-        "security_decisionType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Security/SsvcDecisionType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Security/decisionType",
-            "@type": "@vocab",
-        },
-        "security_exploited" : {
-            "@id": "https://rdf.spdx.org/v3/Security/exploited",
-            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
-        },
-        "security_impactStatement" : {
-            "@id": "https://rdf.spdx.org/v3/Security/impactStatement",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "security_impactStatementTime" : {
-            "@id": "https://rdf.spdx.org/v3/Security/impactStatementTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "security_justificationType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Security/VexJustificationType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Security/justificationType",
-            "@type": "@vocab",
-        },
-        "security_locator" : {
-            "@id": "https://rdf.spdx.org/v3/Security/locator",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "security_modifiedTime" : {
-            "@id": "https://rdf.spdx.org/v3/Security/modifiedTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "security_percentile" : {
-            "@id": "https://rdf.spdx.org/v3/Security/percentile",
-            "@type": "http://www.w3.org/2001/XMLSchema#decimal",
-        },
-        "security_probability" : {
-            "@id": "https://rdf.spdx.org/v3/Security/probability",
-            "@type": "http://www.w3.org/2001/XMLSchema#decimal",
-        },
-        "security_publishedTime" : {
-            "@id": "https://rdf.spdx.org/v3/Security/publishedTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "security_score" : {
-            "@id": "https://rdf.spdx.org/v3/Security/score",
-            "@type": "http://www.w3.org/2001/XMLSchema#decimal",
-        },
-        "security_severity" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Security/CvssSeverityType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Security/severity",
-            "@type": "@vocab",
-        },
-        "security_statusNotes" : {
-            "@id": "https://rdf.spdx.org/v3/Security/statusNotes",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "security_vectorString" : {
-            "@id": "https://rdf.spdx.org/v3/Security/vectorString",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "security_vexVersion" : {
-            "@id": "https://rdf.spdx.org/v3/Security/vexVersion",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "security_withdrawnTime" : {
-            "@id": "https://rdf.spdx.org/v3/Security/withdrawnTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "simplelicensing_AnyLicenseInfo": "https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo",
-        "simplelicensing_LicenseExpression": "https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression",
-        "simplelicensing_SimpleLicensingText": "https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensingText",
-        "simplelicensing_customIdToUri" : {
-            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/customIdToUri",
-            "@type": "@id",
-        },
-        "simplelicensing_licenseExpression" : {
-            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/licenseExpression",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "simplelicensing_licenseListVersion" : {
-            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/licenseListVersion",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "simplelicensing_licenseText" : {
-            "@id": "https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "software_File": "https://rdf.spdx.org/v3/Software/File",
-        "software_Package": "https://rdf.spdx.org/v3/Software/Package",
-        "software_Sbom": "https://rdf.spdx.org/v3/Software/Sbom",
-        "software_SbomType": "https://rdf.spdx.org/v3/Software/SbomType",
-        "software_Snippet": "https://rdf.spdx.org/v3/Software/Snippet",
-        "software_SoftwareArtifact": "https://rdf.spdx.org/v3/Software/SoftwareArtifact",
-        "software_SoftwarePurpose": "https://rdf.spdx.org/v3/Software/SoftwarePurpose",
-        "software_additionalPurpose" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Software/SoftwarePurpose/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Software/additionalPurpose",
-            "@type": "@vocab",
-        },
-        "software_attributionText" : {
-            "@id": "https://rdf.spdx.org/v3/Software/attributionText",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "software_byteRange" : {
-            "@id": "https://rdf.spdx.org/v3/Software/byteRange",
-            "@type": "https://rdf.spdx.org/v3/Core/PositiveIntegerRange",
-        },
-        "software_contentType" : {
-            "@id": "https://rdf.spdx.org/v3/Software/contentType",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "software_copyrightText" : {
-            "@id": "https://rdf.spdx.org/v3/Software/copyrightText",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "software_downloadLocation" : {
-            "@id": "https://rdf.spdx.org/v3/Software/downloadLocation",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "software_gitoid" : {
-            "@id": "https://rdf.spdx.org/v3/Software/gitoid",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "software_homePage" : {
-            "@id": "https://rdf.spdx.org/v3/Software/homePage",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "software_isDirectory" : {
-            "@id": "https://rdf.spdx.org/v3/Software/isDirectory",
-            "@type": "http://www.w3.org/2001/XMLSchema#boolean",
-        },
-        "software_lineRange" : {
-            "@id": "https://rdf.spdx.org/v3/Software/lineRange",
-            "@type": "https://rdf.spdx.org/v3/Core/PositiveIntegerRange",
-        },
-        "software_packageUrl" : {
-            "@id": "https://rdf.spdx.org/v3/Software/packageUrl",
-            "@type": "http://www.w3.org/2001/XMLSchema#anyURI",
-        },
-        "software_packageVersion" : {
-            "@id": "https://rdf.spdx.org/v3/Software/packageVersion",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "software_primaryPurpose" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Software/SoftwarePurpose/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Software/primaryPurpose",
-            "@type": "@vocab",
-        },
-        "software_sbomType" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Software/SbomType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Software/sbomType",
-            "@type": "@vocab",
-        },
-        "software_snippetFromFile" : {
-            "@id": "https://rdf.spdx.org/v3/Software/snippetFromFile",
-            "@type": "@id",
-        },
-        "software_sourceInfo" : {
-            "@id": "https://rdf.spdx.org/v3/Software/sourceInfo",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "spdx": "https://rdf.spdx.org/v3/",
-        "spdxId": "@id",
-        "specVersion" : {
-            "@id": "https://rdf.spdx.org/v3/Core/specVersion",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "standardName" : {
-            "@id": "https://rdf.spdx.org/v3/Core/standardName",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "startTime" : {
-            "@id": "https://rdf.spdx.org/v3/Core/startTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "statement" : {
-            "@id": "https://rdf.spdx.org/v3/Core/statement",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "subject" : {
-            "@id": "https://rdf.spdx.org/v3/Core/subject",
-            "@type": "@id",
-        },
-        "summary" : {
-            "@id": "https://rdf.spdx.org/v3/Core/summary",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "suppliedBy" : {
-            "@id": "https://rdf.spdx.org/v3/Core/suppliedBy",
-            "@type": "@id",
-        },
-        "supportLevel" : {
-            "@context" : {
-                "@vocab": "https://rdf.spdx.org/v3/Core/SupportType/",
-            },
-            "@id": "https://rdf.spdx.org/v3/Core/supportLevel",
-            "@type": "@vocab",
-        },
-        "to" : {
-            "@id": "https://rdf.spdx.org/v3/Core/to",
-            "@type": "@id",
-        },
-        "type": "@type",
-        "validUntilTime" : {
-            "@id": "https://rdf.spdx.org/v3/Core/validUntilTime",
-            "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
-        },
-        "value" : {
-            "@id": "https://rdf.spdx.org/v3/Core/value",
-            "@type": "http://www.w3.org/2001/XMLSchema#string",
-        },
-        "verifiedUsing" : {
-            "@id": "https://rdf.spdx.org/v3/Core/verifiedUsing",
-            "@type": "@id",
-        },
-    },
-]
 
 CONTEXT_URLS = [
     "https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld",
@@ -2058,7 +1601,7 @@ CONTEXT_URLS = [
 
 
 # ENUMERATIONS
-# Categories of safety risk impact of the application.
+# Specifies the safety risk assessment type.
 class ai_SafetyRiskAssessmentType(EnumProp):
     TYPE = "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType"
     valid_values = [
@@ -2067,13 +1610,13 @@ class ai_SafetyRiskAssessmentType(EnumProp):
         ("medium", "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/medium"),
         ("serious", "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/serious"),
     ]
-    # The second-highest level of risk posed by an AI software.
+    # The second-highest level of risk posed by an AI system.
     high = "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/high"
-    # Low/no risk is posed by the AI software.
+    # Low/no risk is posed by the AI system.
     low = "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/low"
-    # The third-highest level of risk posed by an AI software.
+    # The third-highest level of risk posed by an AI system.
     medium = "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/medium"
-    # The highest level of risk posed by an AI software.
+    # The highest level of risk posed by an AI system.
     serious = "https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/serious"
 
 
@@ -2342,7 +1885,7 @@ class HashAlgorithm(EnumProp):
     sha512 = "https://rdf.spdx.org/v3/Core/HashAlgorithm/sha512"
 
 
-# Provide an enumerated set of software lifecycle phases that can provide context to relationships.
+# Provide an enumerated set of lifecycle phases that can provide context to relationships.
 class LifecycleScopeType(EnumProp):
     TYPE = "https://rdf.spdx.org/v3/Core/LifecycleScopeType"
     valid_values = [
@@ -2624,6 +2167,7 @@ class RelationshipType(EnumProp):
 class SupportType(EnumProp):
     TYPE = "https://rdf.spdx.org/v3/Core/SupportType"
     valid_values = [
+        ("deployed", "https://rdf.spdx.org/v3/Core/SupportType/deployed"),
         ("development", "https://rdf.spdx.org/v3/Core/SupportType/development"),
         ("endOfSupport", "https://rdf.spdx.org/v3/Core/SupportType/endOfSupport"),
         ("limitedSupport", "https://rdf.spdx.org/v3/Core/SupportType/limitedSupport"),
@@ -2631,6 +2175,8 @@ class SupportType(EnumProp):
         ("noSupport", "https://rdf.spdx.org/v3/Core/SupportType/noSupport"),
         ("support", "https://rdf.spdx.org/v3/Core/SupportType/support"),
     ]
+    # in addition to being supported by the supplier, the software is known to have been deployed and is in use.  For a software as a service provider, this implies the software is now available as a service.
+    deployed = "https://rdf.spdx.org/v3/Core/SupportType/deployed"
     # the artifact is in active development and is not considered ready for formal support from the supplier.
     development = "https://rdf.spdx.org/v3/Core/SupportType/development"
     # there is a defined end of support for the artifact from the supplier.  This may also be referred to as end of life. There is a validUntilDate that can be used to signal when support ends for the artifact.
@@ -2811,6 +2357,19 @@ class security_VexJustificationType(EnumProp):
     vulnerableCodeNotPresent = "https://rdf.spdx.org/v3/Security/VexJustificationType/vulnerableCodeNotPresent"
 
 
+# Enumeration of the different kinds of SPDX file.
+class software_FileKindType(EnumProp):
+    TYPE = "https://rdf.spdx.org/v3/Software/FileKindType"
+    valid_values = [
+        ("directory", "https://rdf.spdx.org/v3/Software/FileKindType/directory"),
+        ("file", "https://rdf.spdx.org/v3/Software/FileKindType/file"),
+    ]
+    # The file represents a directory and all content stored in that directory.
+    directory = "https://rdf.spdx.org/v3/Software/FileKindType/directory"
+    # The file represents a single file (default).
+    file = "https://rdf.spdx.org/v3/Software/FileKindType/file"
+
+
 # Provides a set of values to be used to describe the common types of SBOMs that tools may create.
 class software_SbomType(EnumProp):
     TYPE = "https://rdf.spdx.org/v3/Software/SbomType"
@@ -2932,2142 +2491,2275 @@ class software_SoftwarePurpose(EnumProp):
 
 # CLASSES
 # Provides information about the creation of the Element.
+@register("https://rdf.spdx.org/v3/Core/CreationInfo", "CreationInfo")
 class CreationInfo(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/CreationInfo"
-    REFABLE = Refable.local
-    ID_ALIAS = "id"
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provide consumers with comments by the creator of the Element about the Element.
-        self._add_property(
+        cls._add_property(
             "comment",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/comment",
+            compact="comment",
         )
         # Identifies when the Element was originally created.
-        self._add_property(
+        cls._add_property(
             "created",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Core/created",
             min_count=1,
+            compact="created",
         )
         # Identifies who or what created the Element.
-        self._add_property(
+        cls._add_property(
             "createdBy",
             ListProp(ObjectProp(Agent, False)),
             iri="https://rdf.spdx.org/v3/Core/createdBy",
             min_count=1,
+            compact="createdBy",
         )
         # Identifies the tooling that was used during the creation of the Element.
-        self._add_property(
+        cls._add_property(
             "createdUsing",
             ListProp(ObjectProp(Tool, False)),
             iri="https://rdf.spdx.org/v3/Core/createdUsing",
+            compact="createdUsing",
         )
         # Provides a reference number that can be used to understand how to parse and interpret an Element.
-        self._add_property(
+        cls._add_property(
             "specVersion",
             StringProp(pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",),
             iri="https://rdf.spdx.org/v3/Core/specVersion",
             min_count=1,
+            compact="specVersion",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/CreationInfo"] = CreationInfo
 
 
 # A key with an associated value.
+@register("https://rdf.spdx.org/v3/Core/DictionaryEntry", "DictionaryEntry")
 class DictionaryEntry(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/DictionaryEntry"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # A key used in a generic key-value pair.
-        self._add_property(
+        cls._add_property(
             "key",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/key",
             min_count=1,
+            compact="key",
         )
         # A value used in a generic key-value pair.
-        self._add_property(
+        cls._add_property(
             "value",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/value",
+            compact="value",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/DictionaryEntry"] = DictionaryEntry
 
 
 # Base domain class from which all other SPDX-3.0 domain classes derive.
+@register("https://rdf.spdx.org/v3/Core/Element", "Element")
 class Element(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/Element"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provide consumers with comments by the creator of the Element about the Element.
-        self._add_property(
+        cls._add_property(
             "comment",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/comment",
+            compact="comment",
         )
         # Provides information about the creation of the Element.
-        self._add_property(
+        cls._add_property(
             "creationInfo",
             ObjectProp(CreationInfo, True),
             iri="https://rdf.spdx.org/v3/Core/creationInfo",
             min_count=1,
+            compact="creationInfo",
         )
         # Provides a detailed description of the Element.
-        self._add_property(
+        cls._add_property(
             "description",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/description",
+            compact="description",
         )
         # Specifies an Extension characterization of some aspect of an Element.
-        self._add_property(
+        cls._add_property(
             "extension",
             ListProp(ObjectProp(extension_Extension, False)),
             iri="https://rdf.spdx.org/v3/Core/extension",
+            compact="extension",
         )
         # Provides a reference to a resource outside the scope of SPDX-3.0 content
         # that uniquely identifies an Element.
-        self._add_property(
+        cls._add_property(
             "externalIdentifier",
             ListProp(ObjectProp(ExternalIdentifier, False)),
             iri="https://rdf.spdx.org/v3/Core/externalIdentifier",
+            compact="externalIdentifier",
         )
         # Points to a resource outside the scope of the SPDX-3.0 content
         # that provides additional characteristics of an Element.
-        self._add_property(
+        cls._add_property(
             "externalRef",
             ListProp(ObjectProp(ExternalRef, False)),
             iri="https://rdf.spdx.org/v3/Core/externalRef",
+            compact="externalRef",
         )
         # Identifies the name of an Element as designated by the creator.
-        self._add_property(
+        cls._add_property(
             "name",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/name",
+            compact="name",
         )
         # A short description of an Element.
-        self._add_property(
+        cls._add_property(
             "summary",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/summary",
+            compact="summary",
         )
         # Provides an IntegrityMethod with which the integrity of an Element can be asserted.
-        self._add_property(
+        cls._add_property(
             "verifiedUsing",
             ListProp(ObjectProp(IntegrityMethod, False)),
             iri="https://rdf.spdx.org/v3/Core/verifiedUsing",
+            compact="verifiedUsing",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Element"] = Element
 
 
 # A collection of Elements, not necessarily with unifying context.
+@register("https://rdf.spdx.org/v3/Core/ElementCollection", "ElementCollection")
 class ElementCollection(Element):
-    TYPE = "https://rdf.spdx.org/v3/Core/ElementCollection"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Refers to one or more Elements that are part of an ElementCollection.
-        self._add_property(
+        cls._add_property(
             "element",
             ListProp(ObjectProp(Element, False)),
             iri="https://rdf.spdx.org/v3/Core/element",
+            compact="element",
         )
         # Describes one a profile which the creator of this ElementCollection intends to conform to.
-        self._add_property(
+        cls._add_property(
             "profileConformance",
-            ListProp(ProfileIdentifierType()),
+            ListProp(ProfileIdentifierType(context=[
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/ai", "ai"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/build", "build"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/core", "core"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/dataset", "dataset"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/expandedLicensing", "expandedLicensing"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/extension", "extension"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/security", "security"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/simpleLicensing", "simpleLicensing"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/software", "software"),
+                ("https://rdf.spdx.org/v3/Core/ProfileIdentifierType/usage", "usage"),
+            ])),
             iri="https://rdf.spdx.org/v3/Core/profileConformance",
+            compact="profileConformance",
         )
         # This property is used to denote the root Element(s) of a tree of elements contained in an SBOM.
-        self._add_property(
+        cls._add_property(
             "rootElement",
             ListProp(ObjectProp(Element, False)),
             iri="https://rdf.spdx.org/v3/Core/rootElement",
+            compact="rootElement",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ElementCollection"] = ElementCollection
 
 
 # A reference to a resource outside the scope of SPDX-3.0 content that uniquely identifies an Element.
+@register("https://rdf.spdx.org/v3/Core/ExternalIdentifier", "ExternalIdentifier")
 class ExternalIdentifier(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/ExternalIdentifier"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provide consumers with comments by the creator of the Element about the Element.
-        self._add_property(
+        cls._add_property(
             "comment",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/comment",
+            compact="comment",
         )
         # Specifies the type of the external identifier.
-        self._add_property(
+        cls._add_property(
             "externalIdentifierType",
-            ExternalIdentifierType(),
+            ExternalIdentifierType(context=[
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/cpe22", "cpe22"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/cpe23", "cpe23"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/cve", "cve"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/email", "email"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/gitoid", "gitoid"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/other", "other"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/packageUrl", "packageUrl"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/securityOther", "securityOther"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/swhid", "swhid"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/swid", "swid"),
+                ("https://rdf.spdx.org/v3/Core/ExternalIdentifierType/urlScheme", "urlScheme"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/externalIdentifierType",
             min_count=1,
+            compact="externalIdentifierType",
         )
         # Uniquely identifies an external element.
-        self._add_property(
+        cls._add_property(
             "identifier",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/identifier",
             min_count=1,
+            compact="identifier",
         )
         # Provides the location for more information regarding an external identifier.
-        self._add_property(
+        cls._add_property(
             "identifierLocator",
             ListProp(AnyURIProp()),
             iri="https://rdf.spdx.org/v3/Core/identifierLocator",
+            compact="identifierLocator",
         )
         # An entity that is authorized to issue identification credentials.
-        self._add_property(
+        cls._add_property(
             "issuingAuthority",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/issuingAuthority",
+            compact="issuingAuthority",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ExternalIdentifier"] = ExternalIdentifier
 
 
 # A map of Element identifiers that are used within a Document but defined external to that Document.
+@register("https://rdf.spdx.org/v3/Core/ExternalMap", "ExternalMap")
 class ExternalMap(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/ExternalMap"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Artifact representing a serialization instance of SPDX data containing the definition of a particular Element.
-        self._add_property(
+        cls._add_property(
             "definingArtifact",
             ObjectProp(Artifact, False),
             iri="https://rdf.spdx.org/v3/Core/definingArtifact",
+            compact="definingArtifact",
         )
         # Identifies an external Element used within a Document but defined external to that Document.
-        self._add_property(
+        cls._add_property(
             "externalSpdxId",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Core/externalSpdxId",
             min_count=1,
+            compact="externalSpdxId",
         )
         # Provides an indication of where to retrieve an external Element.
-        self._add_property(
+        cls._add_property(
             "locationHint",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Core/locationHint",
+            compact="locationHint",
         )
         # Provides an IntegrityMethod with which the integrity of an Element can be asserted.
-        self._add_property(
+        cls._add_property(
             "verifiedUsing",
             ListProp(ObjectProp(IntegrityMethod, False)),
             iri="https://rdf.spdx.org/v3/Core/verifiedUsing",
+            compact="verifiedUsing",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ExternalMap"] = ExternalMap
 
 
 # A reference to a resource outside the scope of SPDX-3.0 content.
+@register("https://rdf.spdx.org/v3/Core/ExternalRef", "ExternalRef")
 class ExternalRef(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/ExternalRef"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provide consumers with comments by the creator of the Element about the Element.
-        self._add_property(
+        cls._add_property(
             "comment",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/comment",
+            compact="comment",
         )
         # Specifies the media type of an Element or Property.
-        self._add_property(
+        cls._add_property(
             "contentType",
             StringProp(pattern=r"^[^\/]+\/[^\/]+$",),
             iri="https://rdf.spdx.org/v3/Core/contentType",
+            compact="contentType",
         )
         # Specifies the type of the external reference.
-        self._add_property(
+        cls._add_property(
             "externalRefType",
-            ExternalRefType(),
+            ExternalRefType(context=[
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/altDownloadLocation", "altDownloadLocation"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/altWebPage", "altWebPage"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/binaryArtifact", "binaryArtifact"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/bower", "bower"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/buildMeta", "buildMeta"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/buildSystem", "buildSystem"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/certificationReport", "certificationReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/chat", "chat"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/componentAnalysisReport", "componentAnalysisReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/documentation", "documentation"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/dynamicAnalysisReport", "dynamicAnalysisReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/eolNotice", "eolNotice"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/exportControlAssessment", "exportControlAssessment"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/funding", "funding"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/issueTracker", "issueTracker"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/license", "license"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/mailingList", "mailingList"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/mavenCentral", "mavenCentral"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/metrics", "metrics"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/npm", "npm"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/nuget", "nuget"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/other", "other"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/privacyAssessment", "privacyAssessment"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/productMetadata", "productMetadata"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/purchaseOrder", "purchaseOrder"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/qualityAssessmentReport", "qualityAssessmentReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/releaseHistory", "releaseHistory"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/releaseNotes", "releaseNotes"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/riskAssessment", "riskAssessment"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/runtimeAnalysisReport", "runtimeAnalysisReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/secureSoftwareAttestation", "secureSoftwareAttestation"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityAdversaryModel", "securityAdversaryModel"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityAdvisory", "securityAdvisory"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityFix", "securityFix"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityOther", "securityOther"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityPenTestReport", "securityPenTestReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityPolicy", "securityPolicy"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/securityThreatModel", "securityThreatModel"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/socialMedia", "socialMedia"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/sourceArtifact", "sourceArtifact"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/staticAnalysisReport", "staticAnalysisReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/support", "support"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/vcs", "vcs"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/vulnerabilityDisclosureReport", "vulnerabilityDisclosureReport"),
+                ("https://rdf.spdx.org/v3/Core/ExternalRefType/vulnerabilityExploitabilityAssessment", "vulnerabilityExploitabilityAssessment"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/externalRefType",
+            compact="externalRefType",
         )
         # Provides the location of an external reference.
-        self._add_property(
+        cls._add_property(
             "locator",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Core/locator",
+            compact="locator",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/ExternalRef"] = ExternalRef
 
 
 # Provides an independently reproducible mechanism that permits verification of a specific Element.
+@register("https://rdf.spdx.org/v3/Core/IntegrityMethod", "IntegrityMethod")
 class IntegrityMethod(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/IntegrityMethod"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provide consumers with comments by the creator of the Element about the Element.
-        self._add_property(
+        cls._add_property(
             "comment",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/comment",
+            compact="comment",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/IntegrityMethod"] = IntegrityMethod
 
 
 # A mapping between prefixes and namespace partial URIs.
+@register("https://rdf.spdx.org/v3/Core/NamespaceMap", "NamespaceMap")
 class NamespaceMap(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/NamespaceMap"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides an unambiguous mechanism for conveying a URI fragment portion of an ElementID.
-        self._add_property(
+        cls._add_property(
             "namespace",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Core/namespace",
             min_count=1,
+            compact="namespace",
         )
         # A substitute for a URI.
-        self._add_property(
+        cls._add_property(
             "prefix",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/prefix",
             min_count=1,
+            compact="prefix",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/NamespaceMap"] = NamespaceMap
 
 
 # An SPDX version 2.X compatible verification method for software packages.
+@register("https://rdf.spdx.org/v3/Core/PackageVerificationCode", "PackageVerificationCode")
 class PackageVerificationCode(IntegrityMethod):
-    TYPE = "https://rdf.spdx.org/v3/Core/PackageVerificationCode"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # The result of applying a hash algorithm to an Element.
-        self._add_property(
+        cls._add_property(
             "hashValue",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/hashValue",
             min_count=1,
+            compact="hashValue",
         )
         # The relative file name of a file to be excluded from the `PackageVerificationCode`.
-        self._add_property(
+        cls._add_property(
             "packageVerificationCodeExcludedFile",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Core/packageVerificationCodeExcludedFile",
+            compact="packageVerificationCodeExcludedFile",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/PackageVerificationCode"] = PackageVerificationCode
 
 
 # A tuple of two positive integers that define a range.
+@register("https://rdf.spdx.org/v3/Core/PositiveIntegerRange", "PositiveIntegerRange")
 class PositiveIntegerRange(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Core/PositiveIntegerRange"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Defines the beginning of a range.
-        self._add_property(
+        cls._add_property(
             "beginIntegerRange",
             PositiveIntegerProp(),
             iri="https://rdf.spdx.org/v3/Core/beginIntegerRange",
             min_count=1,
+            compact="beginIntegerRange",
         )
         # Defines the end of a range.
-        self._add_property(
+        cls._add_property(
             "endIntegerRange",
             PositiveIntegerProp(),
             iri="https://rdf.spdx.org/v3/Core/endIntegerRange",
             min_count=1,
+            compact="endIntegerRange",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/PositiveIntegerRange"] = PositiveIntegerRange
 
 
 # Describes a relationship between one or more elements.
+@register("https://rdf.spdx.org/v3/Core/Relationship", "Relationship")
 class Relationship(Element):
-    TYPE = "https://rdf.spdx.org/v3/Core/Relationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides information about the completeness of relationships.
-        self._add_property(
+        cls._add_property(
             "completeness",
-            RelationshipCompleteness(),
+            RelationshipCompleteness(context=[
+                ("https://rdf.spdx.org/v3/Core/RelationshipCompleteness/complete", "complete"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipCompleteness/incomplete", "incomplete"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipCompleteness/noAssertion", "noAssertion"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/completeness",
+            compact="completeness",
         )
         # Specifies the time from which an element is no longer applicable / valid.
-        self._add_property(
+        cls._add_property(
             "endTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Core/endTime",
+            compact="endTime",
         )
         # References the Element on the left-hand side of a relationship.
-        self._add_property(
+        cls._add_property(
             "from_",
             ObjectProp(Element, True),
             iri="https://rdf.spdx.org/v3/Core/from",
             min_count=1,
+            compact="from",
         )
         # Information about the relationship between two Elements.
-        self._add_property(
+        cls._add_property(
             "relationshipType",
-            RelationshipType(),
+            RelationshipType(context=[
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/affects", "affects"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/amendedBy", "amendedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/ancestorOf", "ancestorOf"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/availableFrom", "availableFrom"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/configures", "configures"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/contains", "contains"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/coordinatedBy", "coordinatedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/copiedTo", "copiedTo"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/delegatedTo", "delegatedTo"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/dependsOn", "dependsOn"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/descendantOf", "descendantOf"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/describes", "describes"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/doesNotAffect", "doesNotAffect"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/expandsTo", "expandsTo"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/exploitCreatedBy", "exploitCreatedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/fixedBy", "fixedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/fixedIn", "fixedIn"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/foundBy", "foundBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/generates", "generates"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasAddedFile", "hasAddedFile"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasAssessmentFor", "hasAssessmentFor"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasAssociatedVulnerability", "hasAssociatedVulnerability"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasConcludedLicense", "hasConcludedLicense"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDataFile", "hasDataFile"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDeclaredLicense", "hasDeclaredLicense"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDeletedFile", "hasDeletedFile"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDependencyManifest", "hasDependencyManifest"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDistributionArtifact", "hasDistributionArtifact"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDocumentation", "hasDocumentation"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasDynamicLink", "hasDynamicLink"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasEvidence", "hasEvidence"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasExample", "hasExample"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasHost", "hasHost"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasInputs", "hasInputs"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasMetadata", "hasMetadata"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasOptionalComponent", "hasOptionalComponent"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasOptionalDependency", "hasOptionalDependency"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasOutputs", "hasOutputs"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasPrerequsite", "hasPrerequsite"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasProvidedDependency", "hasProvidedDependency"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasRequirement", "hasRequirement"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasSpecification", "hasSpecification"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasStaticLink", "hasStaticLink"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasTest", "hasTest"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasTestCase", "hasTestCase"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/hasVariant", "hasVariant"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/invokedBy", "invokedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/modifiedBy", "modifiedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/other", "other"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/packagedBy", "packagedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/patchedBy", "patchedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/publishedBy", "publishedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/reportedBy", "reportedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/republishedBy", "republishedBy"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/serializedInArtifact", "serializedInArtifact"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/testedOn", "testedOn"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/trainedOn", "trainedOn"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/underInvestigationFor", "underInvestigationFor"),
+                ("https://rdf.spdx.org/v3/Core/RelationshipType/usesTool", "usesTool"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/relationshipType",
             min_count=1,
+            compact="relationshipType",
         )
         # Specifies the time from which an element is applicable / valid.
-        self._add_property(
+        cls._add_property(
             "startTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Core/startTime",
+            compact="startTime",
         )
         # References an Element on the right-hand side of a relationship.
-        self._add_property(
+        cls._add_property(
             "to",
             ListProp(ObjectProp(Element, False)),
             iri="https://rdf.spdx.org/v3/Core/to",
+            compact="to",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Relationship"] = Relationship
 
 
 # A collection of SPDX Elements that could potentially be serialized.
+@register("https://rdf.spdx.org/v3/Core/SpdxDocument", "SpdxDocument")
 class SpdxDocument(ElementCollection):
-    TYPE = "https://rdf.spdx.org/v3/Core/SpdxDocument"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides the license under which the SPDX documentation of the Element can be used.
-        self._add_property(
+        cls._add_property(
             "dataLicense",
             ObjectProp(simplelicensing_AnyLicenseInfo, False),
             iri="https://rdf.spdx.org/v3/Core/dataLicense",
+            compact="dataLicense",
         )
         # Provides an ExternalMap of Element identifiers.
-        self._add_property(
+        cls._add_property(
             "imports",
             ListProp(ObjectProp(ExternalMap, False)),
             iri="https://rdf.spdx.org/v3/Core/imports",
+            compact="imports",
         )
         # Provides a NamespaceMap of prefixes and associated namespace partial URIs applicable to an SpdxDocument and independent of any specific serialization format or instance.
-        self._add_property(
+        cls._add_property(
             "namespaceMap",
             ListProp(ObjectProp(NamespaceMap, False)),
             iri="https://rdf.spdx.org/v3/Core/namespaceMap",
+            compact="namespaceMap",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/SpdxDocument"] = SpdxDocument
 
 
 # An element of hardware and/or software utilized to carry out a particular function.
+@register("https://rdf.spdx.org/v3/Core/Tool", "Tool")
 class Tool(Element):
-    TYPE = "https://rdf.spdx.org/v3/Core/Tool"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Tool"] = Tool
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Abstract class for additional text intended to be added to a License, but
 # which is not itself a standalone License.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/LicenseAddition", "expandedlicensing_LicenseAddition")
 class expandedlicensing_LicenseAddition(Element):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/LicenseAddition"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Identifies the full text of a LicenseAddition.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_additionText",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/additionText",
             min_count=1,
+            compact="expandedlicensing_additionText",
         )
         # Specifies whether an additional text identifier has been marked as deprecated.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_isDeprecatedAdditionId",
             BooleanProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedAdditionId",
+            compact="expandedlicensing_isDeprecatedAdditionId",
         )
         # Identifies all the text and metadata associated with a license in the license XML format.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_licenseXml",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
+            compact="expandedlicensing_licenseXml",
         )
         # Specifies the licenseId that is preferred to be used in place of a deprecated
         # License or LicenseAddition.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_obsoletedBy",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
+            compact="expandedlicensing_obsoletedBy",
         )
         # Contains a URL where the License or LicenseAddition can be found in use.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_seeAlso",
             ListProp(AnyURIProp()),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
+            compact="expandedlicensing_seeAlso",
         )
         # Identifies the full text of a LicenseAddition, in SPDX templating format.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_standardAdditionTemplate",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/standardAdditionTemplate",
+            compact="expandedlicensing_standardAdditionTemplate",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/LicenseAddition"] = expandedlicensing_LicenseAddition
 
 
 # A license exception that is listed on the SPDX Exceptions list.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicenseException", "expandedlicensing_ListedLicenseException")
 class expandedlicensing_ListedLicenseException(expandedlicensing_LicenseAddition):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicenseException"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies the SPDX License List version in which this license or exception
         # identifier was deprecated.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_deprecatedVersion",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
+            compact="expandedlicensing_deprecatedVersion",
         )
         # Specifies the SPDX License List version in which this ListedLicense or
         # ListedLicenseException identifier was first added.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_listVersionAdded",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
+            compact="expandedlicensing_listVersionAdded",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicenseException"] = expandedlicensing_ListedLicenseException
 
 
 # A characterization of some aspect of an Element that is associated with the Element in a generalized fashion.
+@register("https://rdf.spdx.org/v3/Extension/Extension", "extension_Extension")
 class extension_Extension(SHACLObject):
-    TYPE = "https://rdf.spdx.org/v3/Extension/Extension"
-    REFABLE = Refable.optional
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Extension/Extension"] = extension_Extension
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Abstract ancestor class for all vulnerability assessments
+@register("https://rdf.spdx.org/v3/Security/VulnAssessmentRelationship", "security_VulnAssessmentRelationship")
 class security_VulnAssessmentRelationship(Relationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/VulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Identifies who or what supplied the artifact or VulnAssessmentRelationship referenced by the Element.
-        self._add_property(
+        cls._add_property(
             "suppliedBy",
             ObjectProp(Agent, False),
             iri="https://rdf.spdx.org/v3/Core/suppliedBy",
+            compact="suppliedBy",
         )
         # Specifies an element contained in a piece of software where a vulnerability was
         # found.
-        self._add_property(
+        cls._add_property(
             "security_assessedElement",
             ObjectProp(Element, False),
             iri="https://rdf.spdx.org/v3/Security/assessedElement",
+            compact="security_assessedElement",
         )
         # Specifies a time when a vulnerability assessment was modified
-        self._add_property(
+        cls._add_property(
             "security_modifiedTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/modifiedTime",
+            compact="security_modifiedTime",
         )
         # Specifies the time when a vulnerability was published.
-        self._add_property(
+        cls._add_property(
             "security_publishedTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/publishedTime",
+            compact="security_publishedTime",
         )
         # Specified the time and date when a vulnerability was withdrawn.
-        self._add_property(
+        cls._add_property(
             "security_withdrawnTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/withdrawnTime",
+            compact="security_withdrawnTime",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VulnAssessmentRelationship"] = security_VulnAssessmentRelationship
 
 
 # Abstract class representing a license combination consisting of one or more
 # licenses (optionally including additional text), which may be combined
 # according to the SPDX license expression syntax.
+@register("https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo", "simplelicensing_AnyLicenseInfo")
 class simplelicensing_AnyLicenseInfo(Element):
-    TYPE = "https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo"] = simplelicensing_AnyLicenseInfo
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # An SPDX Element containing an SPDX license expression string.
+@register("https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression", "simplelicensing_LicenseExpression")
 class simplelicensing_LicenseExpression(simplelicensing_AnyLicenseInfo):
-    TYPE = "https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Maps a LicenseRef or AdditionRef string for a Custom License or a Custom License Addition to its URI ID.
-        self._add_property(
+        cls._add_property(
             "simplelicensing_customIdToUri",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/SimpleLicensing/customIdToUri",
+            compact="simplelicensing_customIdToUri",
         )
         # A string in the license expression format.
-        self._add_property(
+        cls._add_property(
             "simplelicensing_licenseExpression",
             StringProp(),
             iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseExpression",
             min_count=1,
+            compact="simplelicensing_licenseExpression",
         )
         # The version of the SPDX License List used in the license expression.
-        self._add_property(
+        cls._add_property(
             "simplelicensing_licenseListVersion",
             StringProp(pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",),
             iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseListVersion",
+            compact="simplelicensing_licenseListVersion",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression"] = simplelicensing_LicenseExpression
 
 
 # A license or addition that is not listed on the SPDX License List.
+@register("https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensingText", "simplelicensing_SimpleLicensingText")
 class simplelicensing_SimpleLicensingText(Element):
-    TYPE = "https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensingText"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Identifies the full text of a License or Addition.
-        self._add_property(
+        cls._add_property(
             "simplelicensing_licenseText",
             StringProp(),
             iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
             min_count=1,
+            compact="simplelicensing_licenseText",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/SimpleLicensing/SimpleLicensingText"] = simplelicensing_SimpleLicensingText
 
 
 # Class that describes a build instance of software/artifacts.
+@register("https://rdf.spdx.org/v3/Build/Build", "build_Build")
 class build_Build(Element):
-    TYPE = "https://rdf.spdx.org/v3/Build/Build"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Property that describes the time at which a build stops.
-        self._add_property(
+        cls._add_property(
             "build_buildEndTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Build/buildEndTime",
+            compact="build_buildEndTime",
         )
         # A buildId is a locally unique identifier used by a builder to identify a unique instance of a build produced by it.
-        self._add_property(
+        cls._add_property(
             "build_buildId",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Build/buildId",
+            compact="build_buildId",
         )
         # Property describing the start time of a build.
-        self._add_property(
+        cls._add_property(
             "build_buildStartTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Build/buildStartTime",
+            compact="build_buildStartTime",
         )
         # A buildType is a hint that is used to indicate the toolchain, platform, or infrastructure that the build was invoked on.
-        self._add_property(
+        cls._add_property(
             "build_buildType",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Build/buildType",
             min_count=1,
+            compact="build_buildType",
         )
         # Property that describes the digest of the build configuration file used to invoke a build.
-        self._add_property(
+        cls._add_property(
             "build_configSourceDigest",
             ListProp(ObjectProp(Hash, False)),
             iri="https://rdf.spdx.org/v3/Build/configSourceDigest",
+            compact="build_configSourceDigest",
         )
         # Property describes the invocation entrypoint of a build.
-        self._add_property(
+        cls._add_property(
             "build_configSourceEntrypoint",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Build/configSourceEntrypoint",
+            compact="build_configSourceEntrypoint",
         )
         # Property that describes the URI of the build configuration source file.
-        self._add_property(
+        cls._add_property(
             "build_configSourceUri",
             ListProp(AnyURIProp()),
             iri="https://rdf.spdx.org/v3/Build/configSourceUri",
+            compact="build_configSourceUri",
         )
         # Property describing the session in which a build is invoked.
-        self._add_property(
+        cls._add_property(
             "build_environment",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/Build/environment",
+            compact="build_environment",
         )
         # Property describing the parameters used in an instance of a build.
-        self._add_property(
+        cls._add_property(
             "build_parameters",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/Build/parameters",
+            compact="build_parameters",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Build/Build"] = build_Build
 
 
 # Agent represents anything with the potential to act on a system.
+@register("https://rdf.spdx.org/v3/Core/Agent", "Agent")
 class Agent(Element):
-    TYPE = "https://rdf.spdx.org/v3/Core/Agent"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Agent"] = Agent
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # An assertion made in relation to one or more elements.
+@register("https://rdf.spdx.org/v3/Core/Annotation", "Annotation")
 class Annotation(Element):
-    TYPE = "https://rdf.spdx.org/v3/Core/Annotation"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Describes the type of annotation.
-        self._add_property(
+        cls._add_property(
             "annotationType",
-            AnnotationType(),
+            AnnotationType(context=[
+                ("https://rdf.spdx.org/v3/Core/AnnotationType/other", "other"),
+                ("https://rdf.spdx.org/v3/Core/AnnotationType/review", "review"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/annotationType",
             min_count=1,
+            compact="annotationType",
         )
         # Specifies the media type of an Element or Property.
-        self._add_property(
+        cls._add_property(
             "contentType",
             StringProp(pattern=r"^[^\/]+\/[^\/]+$",),
             iri="https://rdf.spdx.org/v3/Core/contentType",
+            compact="contentType",
         )
         # Commentary on an assertion that an annotator has made.
-        self._add_property(
+        cls._add_property(
             "statement",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/statement",
+            compact="statement",
         )
         # An Element an annotator has made an assertion about.
-        self._add_property(
+        cls._add_property(
             "subject",
             ObjectProp(Element, True),
             iri="https://rdf.spdx.org/v3/Core/subject",
             min_count=1,
+            compact="subject",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Annotation"] = Annotation
 
 
 # A distinct article or unit within the digital domain.
+@register("https://rdf.spdx.org/v3/Core/Artifact", "Artifact")
 class Artifact(Element):
-    TYPE = "https://rdf.spdx.org/v3/Core/Artifact"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies the time an artifact was built.
-        self._add_property(
+        cls._add_property(
             "builtTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Core/builtTime",
+            compact="builtTime",
         )
         # Identifies from where or whom the Element originally came.
-        self._add_property(
+        cls._add_property(
             "originatedBy",
             ListProp(ObjectProp(Agent, False)),
             iri="https://rdf.spdx.org/v3/Core/originatedBy",
+            compact="originatedBy",
         )
         # Specifies the time an artifact was released.
-        self._add_property(
+        cls._add_property(
             "releaseTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Core/releaseTime",
+            compact="releaseTime",
         )
         # The name of a relevant standard that may apply to an artifact.
-        self._add_property(
+        cls._add_property(
             "standardName",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Core/standardName",
+            compact="standardName",
         )
         # Identifies who or what supplied the artifact or VulnAssessmentRelationship referenced by the Element.
-        self._add_property(
+        cls._add_property(
             "suppliedBy",
             ObjectProp(Agent, False),
             iri="https://rdf.spdx.org/v3/Core/suppliedBy",
+            compact="suppliedBy",
         )
         # Specifies the level of support associated with an artifact.
-        self._add_property(
+        cls._add_property(
             "supportLevel",
-            ListProp(SupportType()),
+            ListProp(SupportType(context=[
+                ("https://rdf.spdx.org/v3/Core/SupportType/deployed", "deployed"),
+                ("https://rdf.spdx.org/v3/Core/SupportType/development", "development"),
+                ("https://rdf.spdx.org/v3/Core/SupportType/endOfSupport", "endOfSupport"),
+                ("https://rdf.spdx.org/v3/Core/SupportType/limitedSupport", "limitedSupport"),
+                ("https://rdf.spdx.org/v3/Core/SupportType/noAssertion", "noAssertion"),
+                ("https://rdf.spdx.org/v3/Core/SupportType/noSupport", "noSupport"),
+                ("https://rdf.spdx.org/v3/Core/SupportType/support", "support"),
+            ])),
             iri="https://rdf.spdx.org/v3/Core/supportLevel",
+            compact="supportLevel",
         )
         # Specifies until when the artifact can be used before its usage needs to be reassessed.
-        self._add_property(
+        cls._add_property(
             "validUntilTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Core/validUntilTime",
+            compact="validUntilTime",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Artifact"] = Artifact
 
 
 # A collection of Elements that have a shared context.
+@register("https://rdf.spdx.org/v3/Core/Bundle", "Bundle")
 class Bundle(ElementCollection):
-    TYPE = "https://rdf.spdx.org/v3/Core/Bundle"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Gives information about the circumstances or unifying properties
         # that Elements of the bundle have been assembled under.
-        self._add_property(
+        cls._add_property(
             "context",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/context",
+            compact="context",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Bundle"] = Bundle
 
 
 # A mathematically calculated representation of a grouping of data.
+@register("https://rdf.spdx.org/v3/Core/Hash", "Hash")
 class Hash(IntegrityMethod):
-    TYPE = "https://rdf.spdx.org/v3/Core/Hash"
-    REFABLE = Refable.no
+    NODE_KIND = NodeKind.BlankNodeOrIRI
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies the algorithm used for calculating the hash value.
-        self._add_property(
+        cls._add_property(
             "algorithm",
-            HashAlgorithm(),
+            HashAlgorithm(context=[
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/blake2b256", "blake2b256"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/blake2b384", "blake2b384"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/blake2b512", "blake2b512"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/blake3", "blake3"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/crystalsDilithium", "crystalsDilithium"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/crystalsKyber", "crystalsKyber"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/falcon", "falcon"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/md2", "md2"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/md4", "md4"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/md5", "md5"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/md6", "md6"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/other", "other"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha1", "sha1"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha224", "sha224"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha256", "sha256"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha384", "sha384"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha3_224", "sha3_224"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha3_256", "sha3_256"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha3_384", "sha3_384"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha3_512", "sha3_512"),
+                ("https://rdf.spdx.org/v3/Core/HashAlgorithm/sha512", "sha512"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/algorithm",
             min_count=1,
+            compact="algorithm",
         )
         # The result of applying a hash algorithm to an Element.
-        self._add_property(
+        cls._add_property(
             "hashValue",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Core/hashValue",
             min_count=1,
+            compact="hashValue",
         )
-        self._set_init_props(**kwargs)
 
 
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Hash"] = Hash
-
-
-# Provide context for a relationship that occurs in the software lifecycle.
+# Provide context for a relationship that occurs in the lifecycle.
+@register("https://rdf.spdx.org/v3/Core/LifecycleScopedRelationship", "LifecycleScopedRelationship")
 class LifecycleScopedRelationship(Relationship):
-    TYPE = "https://rdf.spdx.org/v3/Core/LifecycleScopedRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Capture the scope of information about a specific relationship between elements.
-        self._add_property(
+        cls._add_property(
             "scope",
-            LifecycleScopeType(),
+            LifecycleScopeType(context=[
+                ("https://rdf.spdx.org/v3/Core/LifecycleScopeType/build", "build"),
+                ("https://rdf.spdx.org/v3/Core/LifecycleScopeType/design", "design"),
+                ("https://rdf.spdx.org/v3/Core/LifecycleScopeType/development", "development"),
+                ("https://rdf.spdx.org/v3/Core/LifecycleScopeType/other", "other"),
+                ("https://rdf.spdx.org/v3/Core/LifecycleScopeType/runtime", "runtime"),
+                ("https://rdf.spdx.org/v3/Core/LifecycleScopeType/test", "test"),
+            ]),
             iri="https://rdf.spdx.org/v3/Core/scope",
+            compact="scope",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/LifecycleScopedRelationship"] = LifecycleScopedRelationship
 
 
 # A group of people who work together in an organized way for a shared purpose.
+@register("https://rdf.spdx.org/v3/Core/Organization", "Organization")
 class Organization(Agent):
-    TYPE = "https://rdf.spdx.org/v3/Core/Organization"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Organization"] = Organization
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # An individual human being.
+@register("https://rdf.spdx.org/v3/Core/Person", "Person")
 class Person(Agent):
-    TYPE = "https://rdf.spdx.org/v3/Core/Person"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Person"] = Person
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # A software agent.
+@register("https://rdf.spdx.org/v3/Core/SoftwareAgent", "SoftwareAgent")
 class SoftwareAgent(Agent):
-    TYPE = "https://rdf.spdx.org/v3/Core/SoftwareAgent"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/SoftwareAgent"] = SoftwareAgent
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Portion of an AnyLicenseInfo representing a set of licensing information
 # where all elements apply.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet", "expandedlicensing_ConjunctiveLicenseSet")
 class expandedlicensing_ConjunctiveLicenseSet(simplelicensing_AnyLicenseInfo):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # A license expression participating in a license set.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_member",
             ListProp(ObjectProp(simplelicensing_AnyLicenseInfo, False)),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/member",
             min_count=2,
+            compact="expandedlicensing_member",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet"] = expandedlicensing_ConjunctiveLicenseSet
 
 
 # A license addition that is not listed on the SPDX Exceptions List.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicenseAddition", "expandedlicensing_CustomLicenseAddition")
 class expandedlicensing_CustomLicenseAddition(expandedlicensing_LicenseAddition):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicenseAddition"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicenseAddition"] = expandedlicensing_CustomLicenseAddition
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Portion of an AnyLicenseInfo representing a set of licensing information
-# where only any one of the elements applies.
+# where only one of the elements applies.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/DisjunctiveLicenseSet", "expandedlicensing_DisjunctiveLicenseSet")
 class expandedlicensing_DisjunctiveLicenseSet(simplelicensing_AnyLicenseInfo):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/DisjunctiveLicenseSet"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # A license expression participating in a license set.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_member",
             ListProp(ObjectProp(simplelicensing_AnyLicenseInfo, False)),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/member",
             min_count=2,
+            compact="expandedlicensing_member",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/DisjunctiveLicenseSet"] = expandedlicensing_DisjunctiveLicenseSet
 
 
 # Abstract class representing a License or an OrLaterOperator.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/ExtendableLicense", "expandedlicensing_ExtendableLicense")
 class expandedlicensing_ExtendableLicense(simplelicensing_AnyLicenseInfo):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ExtendableLicense"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ExtendableLicense"] = expandedlicensing_ExtendableLicense
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # A concrete subclass of AnyLicenseInfo used by Individuals in the ExpandedLicensing profile.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/IndividualLicensingInfo", "expandedlicensing_IndividualLicensingInfo")
 class expandedlicensing_IndividualLicensingInfo(simplelicensing_AnyLicenseInfo):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/IndividualLicensingInfo"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/IndividualLicensingInfo"] = expandedlicensing_IndividualLicensingInfo
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Abstract class for the portion of an AnyLicenseInfo representing a license.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/License", "expandedlicensing_License")
 class expandedlicensing_License(expandedlicensing_ExtendableLicense):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/License"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies whether a license or additional text identifier has been marked as
         # deprecated.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_isDeprecatedLicenseId",
             BooleanProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/isDeprecatedLicenseId",
+            compact="expandedlicensing_isDeprecatedLicenseId",
         )
         # Specifies whether the License is listed as free by the
         # [Free Software Foundation (FSF)](https://fsf.org).
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_isFsfLibre",
             BooleanProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/isFsfLibre",
+            compact="expandedlicensing_isFsfLibre",
         )
         # Specifies whether the License is listed as approved by the
         # [Open Source Initiative (OSI)](https://opensource.org).
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_isOsiApproved",
             BooleanProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/isOsiApproved",
+            compact="expandedlicensing_isOsiApproved",
         )
         # Identifies all the text and metadata associated with a license in the license XML format.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_licenseXml",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/licenseXml",
+            compact="expandedlicensing_licenseXml",
         )
         # Specifies the licenseId that is preferred to be used in place of a deprecated
         # License or LicenseAddition.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_obsoletedBy",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/obsoletedBy",
+            compact="expandedlicensing_obsoletedBy",
         )
         # Contains a URL where the License or LicenseAddition can be found in use.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_seeAlso",
             ListProp(AnyURIProp()),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/seeAlso",
+            compact="expandedlicensing_seeAlso",
         )
         # Provides a License author's preferred text to indicate that a file is covered
         # by the License.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_standardLicenseHeader",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseHeader",
+            compact="expandedlicensing_standardLicenseHeader",
         )
         # Identifies the full text of a License, in SPDX templating format.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_standardLicenseTemplate",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/standardLicenseTemplate",
+            compact="expandedlicensing_standardLicenseTemplate",
         )
         # Identifies the full text of a License or Addition.
-        self._add_property(
+        cls._add_property(
             "simplelicensing_licenseText",
             StringProp(),
             iri="https://rdf.spdx.org/v3/SimpleLicensing/licenseText",
             min_count=1,
+            compact="simplelicensing_licenseText",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/License"] = expandedlicensing_License
 
 
 # A license that is listed on the SPDX License List.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicense", "expandedlicensing_ListedLicense")
 class expandedlicensing_ListedLicense(expandedlicensing_License):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicense"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies the SPDX License List version in which this license or exception
         # identifier was deprecated.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_deprecatedVersion",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/deprecatedVersion",
+            compact="expandedlicensing_deprecatedVersion",
         )
         # Specifies the SPDX License List version in which this ListedLicense or
         # ListedLicenseException identifier was first added.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_listVersionAdded",
             StringProp(),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/listVersionAdded",
+            compact="expandedlicensing_listVersionAdded",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/ListedLicense"] = expandedlicensing_ListedLicense
 
 
 # Portion of an AnyLicenseInfo representing this version, or any later version,
 # of the indicated License.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOperator", "expandedlicensing_OrLaterOperator")
 class expandedlicensing_OrLaterOperator(expandedlicensing_ExtendableLicense):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOperator"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # A License participating in an 'or later' model.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_subjectLicense",
             ObjectProp(expandedlicensing_License, True),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/subjectLicense",
             min_count=1,
+            compact="expandedlicensing_subjectLicense",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/OrLaterOperator"] = expandedlicensing_OrLaterOperator
 
 
 # Portion of an AnyLicenseInfo representing a License which has additional
 # text applied to it.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditionOperator", "expandedlicensing_WithAdditionOperator")
 class expandedlicensing_WithAdditionOperator(simplelicensing_AnyLicenseInfo):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditionOperator"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # A LicenseAddition participating in a 'with addition' model.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_subjectAddition",
             ObjectProp(expandedlicensing_LicenseAddition, True),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/subjectAddition",
             min_count=1,
+            compact="expandedlicensing_subjectAddition",
         )
         # A License participating in a 'with addition' model.
-        self._add_property(
+        cls._add_property(
             "expandedlicensing_subjectExtendableLicense",
             ObjectProp(expandedlicensing_ExtendableLicense, True),
             iri="https://rdf.spdx.org/v3/ExpandedLicensing/subjectExtendableLicense",
             min_count=1,
+            compact="expandedlicensing_subjectExtendableLicense",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/WithAdditionOperator"] = expandedlicensing_WithAdditionOperator
 
 
 # Provides a CVSS version 2.0 assessment for a vulnerability.
+@register("https://rdf.spdx.org/v3/Security/CvssV2VulnAssessmentRelationship", "security_CvssV2VulnAssessmentRelationship")
 class security_CvssV2VulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/CvssV2VulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides a numerical (0-10) representation of the severity of a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_score",
             FloatProp(),
             iri="https://rdf.spdx.org/v3/Security/score",
             min_count=1,
+            compact="security_score",
         )
         # Specifies the CVSS vector string for a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_vectorString",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/vectorString",
             min_count=1,
+            compact="security_vectorString",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/CvssV2VulnAssessmentRelationship"] = security_CvssV2VulnAssessmentRelationship
 
 
 # Provides a CVSS version 3 assessment for a vulnerability.
+@register("https://rdf.spdx.org/v3/Security/CvssV3VulnAssessmentRelationship", "security_CvssV3VulnAssessmentRelationship")
 class security_CvssV3VulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/CvssV3VulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides a numerical (0-10) representation of the severity of a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_score",
             FloatProp(),
             iri="https://rdf.spdx.org/v3/Security/score",
             min_count=1,
+            compact="security_score",
         )
         # Specifies the CVSS qualitative severity rating of a vulnerability in relation to a piece of software.
-        self._add_property(
+        cls._add_property(
             "security_severity",
-            security_CvssSeverityType(),
+            security_CvssSeverityType(context=[
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/critical", "critical"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/high", "high"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/low", "low"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/medium", "medium"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/none", "none"),
+            ]),
             iri="https://rdf.spdx.org/v3/Security/severity",
             min_count=1,
+            compact="security_severity",
         )
         # Specifies the CVSS vector string for a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_vectorString",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/vectorString",
             min_count=1,
+            compact="security_vectorString",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/CvssV3VulnAssessmentRelationship"] = security_CvssV3VulnAssessmentRelationship
 
 
 # Provides a CVSS version 4 assessment for a vulnerability.
+@register("https://rdf.spdx.org/v3/Security/CvssV4VulnAssessmentRelationship", "security_CvssV4VulnAssessmentRelationship")
 class security_CvssV4VulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/CvssV4VulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides a numerical (0-10) representation of the severity of a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_score",
             FloatProp(),
             iri="https://rdf.spdx.org/v3/Security/score",
             min_count=1,
+            compact="security_score",
         )
         # Specifies the CVSS qualitative severity rating of a vulnerability in relation to a piece of software.
-        self._add_property(
+        cls._add_property(
             "security_severity",
-            security_CvssSeverityType(),
+            security_CvssSeverityType(context=[
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/critical", "critical"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/high", "high"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/low", "low"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/medium", "medium"),
+                ("https://rdf.spdx.org/v3/Security/CvssSeverityType/none", "none"),
+            ]),
             iri="https://rdf.spdx.org/v3/Security/severity",
             min_count=1,
+            compact="security_severity",
         )
         # Specifies the CVSS vector string for a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_vectorString",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/vectorString",
             min_count=1,
+            compact="security_vectorString",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/CvssV4VulnAssessmentRelationship"] = security_CvssV4VulnAssessmentRelationship
 
 
 # Provides an EPSS assessment for a vulnerability.
+@register("https://rdf.spdx.org/v3/Security/EpssVulnAssessmentRelationship", "security_EpssVulnAssessmentRelationship")
 class security_EpssVulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/EpssVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # The percentile of the current probability score.
-        self._add_property(
+        cls._add_property(
             "security_percentile",
             FloatProp(),
             iri="https://rdf.spdx.org/v3/Security/percentile",
             min_count=1,
+            compact="security_percentile",
         )
         # A probability score between 0 and 1 of a vulnerability being exploited.
-        self._add_property(
+        cls._add_property(
             "security_probability",
             FloatProp(),
             iri="https://rdf.spdx.org/v3/Security/probability",
             min_count=1,
+            compact="security_probability",
         )
         # Specifies the time when a vulnerability was published.
-        self._add_property(
+        cls._add_property(
             "security_publishedTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/publishedTime",
             min_count=1,
+            compact="security_publishedTime",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/EpssVulnAssessmentRelationship"] = security_EpssVulnAssessmentRelationship
 
 
 # Provides an exploit assessment of a vulnerability.
+@register("https://rdf.spdx.org/v3/Security/ExploitCatalogVulnAssessmentRelationship", "security_ExploitCatalogVulnAssessmentRelationship")
 class security_ExploitCatalogVulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/ExploitCatalogVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies the exploit catalog type.
-        self._add_property(
+        cls._add_property(
             "security_catalogType",
-            security_ExploitCatalogType(),
+            security_ExploitCatalogType(context=[
+                ("https://rdf.spdx.org/v3/Security/ExploitCatalogType/kev", "kev"),
+                ("https://rdf.spdx.org/v3/Security/ExploitCatalogType/other", "other"),
+            ]),
             iri="https://rdf.spdx.org/v3/Security/catalogType",
             min_count=1,
+            compact="security_catalogType",
         )
         # Describe that a CVE is known to have an exploit because it's been listed in an exploit catalog.
-        self._add_property(
+        cls._add_property(
             "security_exploited",
             BooleanProp(),
             iri="https://rdf.spdx.org/v3/Security/exploited",
             min_count=1,
+            compact="security_exploited",
         )
         # Provides the location of an exploit catalog.
-        self._add_property(
+        cls._add_property(
             "security_locator",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Security/locator",
             min_count=1,
+            compact="security_locator",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/ExploitCatalogVulnAssessmentRelationship"] = security_ExploitCatalogVulnAssessmentRelationship
 
 
 # Provides an SSVC assessment for a vulnerability.
+@register("https://rdf.spdx.org/v3/Security/SsvcVulnAssessmentRelationship", "security_SsvcVulnAssessmentRelationship")
 class security_SsvcVulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/SsvcVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provide the enumeration of possible decisions in the Stakeholder-Specific Vulnerability Categorization (SSVC) decision tree [https://www.cisa.gov/sites/default/files/publications/cisa-ssvc-guide%20508c.pdf](https://www.cisa.gov/sites/default/files/publications/cisa-ssvc-guide%20508c.pdf)
-        self._add_property(
+        cls._add_property(
             "security_decisionType",
-            security_SsvcDecisionType(),
+            security_SsvcDecisionType(context=[
+                ("https://rdf.spdx.org/v3/Security/SsvcDecisionType/act", "act"),
+                ("https://rdf.spdx.org/v3/Security/SsvcDecisionType/attend", "attend"),
+                ("https://rdf.spdx.org/v3/Security/SsvcDecisionType/track", "track"),
+                ("https://rdf.spdx.org/v3/Security/SsvcDecisionType/trackStar", "trackStar"),
+            ]),
             iri="https://rdf.spdx.org/v3/Security/decisionType",
             min_count=1,
+            compact="security_decisionType",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/SsvcVulnAssessmentRelationship"] = security_SsvcVulnAssessmentRelationship
 
 
 # Asbtract ancestor class for all VEX relationships
+@register("https://rdf.spdx.org/v3/Security/VexVulnAssessmentRelationship", "security_VexVulnAssessmentRelationship")
 class security_VexVulnAssessmentRelationship(security_VulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/VexVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Conveys information about how VEX status was determined.
-        self._add_property(
+        cls._add_property(
             "security_statusNotes",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/statusNotes",
+            compact="security_statusNotes",
         )
         # Specifies the version of the VEX document.
-        self._add_property(
+        cls._add_property(
             "security_vexVersion",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/vexVersion",
+            compact="security_vexVersion",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexVulnAssessmentRelationship"] = security_VexVulnAssessmentRelationship
 
 
 # Specifies a vulnerability and its associated information.
+@register("https://rdf.spdx.org/v3/Security/Vulnerability", "security_Vulnerability")
 class security_Vulnerability(Artifact):
-    TYPE = "https://rdf.spdx.org/v3/Security/Vulnerability"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Specifies a time when a vulnerability assessment was modified
-        self._add_property(
+        cls._add_property(
             "security_modifiedTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/modifiedTime",
+            compact="security_modifiedTime",
         )
         # Specifies the time when a vulnerability was published.
-        self._add_property(
+        cls._add_property(
             "security_publishedTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/publishedTime",
+            compact="security_publishedTime",
         )
         # Specified the time and date when a vulnerability was withdrawn.
-        self._add_property(
+        cls._add_property(
             "security_withdrawnTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/withdrawnTime",
+            compact="security_withdrawnTime",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/Vulnerability"] = security_Vulnerability
 
 
 # A distinct article or unit related to Software.
+@register("https://rdf.spdx.org/v3/Software/SoftwareArtifact", "software_SoftwareArtifact")
 class software_SoftwareArtifact(Artifact):
-    TYPE = "https://rdf.spdx.org/v3/Software/SoftwareArtifact"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides additional purpose information of the software artifact.
-        self._add_property(
+        cls._add_property(
             "software_additionalPurpose",
-            ListProp(software_SoftwarePurpose()),
+            ListProp(software_SoftwarePurpose(context=[
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/application", "application"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/archive", "archive"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/bom", "bom"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/configuration", "configuration"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/container", "container"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/data", "data"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/device", "device"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/deviceDriver", "deviceDriver"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/diskImage", "diskImage"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/documentation", "documentation"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/evidence", "evidence"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/executable", "executable"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/file", "file"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/filesystemImage", "filesystemImage"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/firmware", "firmware"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/framework", "framework"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/install", "install"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/library", "library"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/manifest", "manifest"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/model", "model"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/module", "module"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/operatingSystem", "operatingSystem"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/other", "other"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/patch", "patch"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/platform", "platform"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/requirement", "requirement"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/source", "source"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/specification", "specification"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/test", "test"),
+            ])),
             iri="https://rdf.spdx.org/v3/Software/additionalPurpose",
+            compact="software_additionalPurpose",
         )
         # Provides a place for the SPDX data creator to record acknowledgement text for
         # a software Package, File or Snippet.
-        self._add_property(
+        cls._add_property(
             "software_attributionText",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Software/attributionText",
+            compact="software_attributionText",
         )
         # Identifies the text of one or more copyright notices for a software Package,
         # File or Snippet, if any.
-        self._add_property(
+        cls._add_property(
             "software_copyrightText",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Software/copyrightText",
+            compact="software_copyrightText",
         )
         # Used to record the artifact’s gitoid: a canonical, unique, immutable identifier that can be used for software integrity verification.
-        self._add_property(
+        cls._add_property(
             "software_gitoid",
             ListProp(AnyURIProp()),
             iri="https://rdf.spdx.org/v3/Software/gitoid",
             max_count=2,
+            compact="software_gitoid",
         )
         # Provides information about the primary purpose of the software artifact.
-        self._add_property(
+        cls._add_property(
             "software_primaryPurpose",
-            software_SoftwarePurpose(),
+            software_SoftwarePurpose(context=[
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/application", "application"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/archive", "archive"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/bom", "bom"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/configuration", "configuration"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/container", "container"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/data", "data"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/device", "device"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/deviceDriver", "deviceDriver"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/diskImage", "diskImage"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/documentation", "documentation"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/evidence", "evidence"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/executable", "executable"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/file", "file"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/filesystemImage", "filesystemImage"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/firmware", "firmware"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/framework", "framework"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/install", "install"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/library", "library"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/manifest", "manifest"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/model", "model"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/module", "module"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/operatingSystem", "operatingSystem"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/other", "other"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/patch", "patch"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/platform", "platform"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/requirement", "requirement"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/source", "source"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/specification", "specification"),
+                ("https://rdf.spdx.org/v3/Software/SoftwarePurpose/test", "test"),
+            ]),
             iri="https://rdf.spdx.org/v3/Software/primaryPurpose",
+            compact="software_primaryPurpose",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/SoftwareArtifact"] = software_SoftwareArtifact
 
 
 # A container for a grouping of SPDX-3.0 content characterizing details
 # (provenence, composition, licensing, etc.) about a product.
+@register("https://rdf.spdx.org/v3/Core/Bom", "Bom")
 class Bom(Bundle):
-    TYPE = "https://rdf.spdx.org/v3/Core/Bom"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Core/Bom"] = Bom
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # A license that is not listed on the SPDX License List.
+@register("https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense", "expandedlicensing_CustomLicense")
 class expandedlicensing_CustomLicense(expandedlicensing_License):
-    TYPE = "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense"] = expandedlicensing_CustomLicense
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Connects a vulnerability and an element designating the element as a product
 # affected by the vulnerability.
+@register("https://rdf.spdx.org/v3/Security/VexAffectedVulnAssessmentRelationship", "security_VexAffectedVulnAssessmentRelationship")
 class security_VexAffectedVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/VexAffectedVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides advise on how to mitigate or remediate a vulnerability when a VEX product
         # is affected by it.
-        self._add_property(
+        cls._add_property(
             "security_actionStatement",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/actionStatement",
+            compact="security_actionStatement",
         )
         # Records the time when a recommended action was communicated in a VEX statement
         # to mitigate a vulnerability.
-        self._add_property(
+        cls._add_property(
             "security_actionStatementTime",
-            ListProp(DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",)),
+            ListProp(DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",)),
             iri="https://rdf.spdx.org/v3/Security/actionStatementTime",
+            compact="security_actionStatementTime",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexAffectedVulnAssessmentRelationship"] = security_VexAffectedVulnAssessmentRelationship
 
 
 # Links a vulnerability and elements representing products (in the VEX sense) where
 # a fix has been applied and are no longer affected.
+@register("https://rdf.spdx.org/v3/Security/VexFixedVulnAssessmentRelationship", "security_VexFixedVulnAssessmentRelationship")
 class security_VexFixedVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/VexFixedVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexFixedVulnAssessmentRelationship"] = security_VexFixedVulnAssessmentRelationship
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Links a vulnerability and one or more elements designating the latter as products
 # not affected by the vulnerability.
+@register("https://rdf.spdx.org/v3/Security/VexNotAffectedVulnAssessmentRelationship", "security_VexNotAffectedVulnAssessmentRelationship")
 class security_VexNotAffectedVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/VexNotAffectedVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Explains why a VEX product is not affected by a vulnerability. It is an
         # alternative in VexNotAffectedVulnAssessmentRelationship to the machine-readable
         # justification label.
-        self._add_property(
+        cls._add_property(
             "security_impactStatement",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Security/impactStatement",
+            compact="security_impactStatement",
         )
         # Timestamp of impact statement.
-        self._add_property(
+        cls._add_property(
             "security_impactStatementTime",
-            DateTimeProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
+            DateTimeStampProp(pattern=r"^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$",),
             iri="https://rdf.spdx.org/v3/Security/impactStatementTime",
+            compact="security_impactStatementTime",
         )
         # Impact justification label to be used when linking a vulnerability to an element
         # representing a VEX product with a VexNotAffectedVulnAssessmentRelationship
         # relationship.
-        self._add_property(
+        cls._add_property(
             "security_justificationType",
-            security_VexJustificationType(),
+            security_VexJustificationType(context=[
+                ("https://rdf.spdx.org/v3/Security/VexJustificationType/componentNotPresent", "componentNotPresent"),
+                ("https://rdf.spdx.org/v3/Security/VexJustificationType/inlineMitigationsAlreadyExist", "inlineMitigationsAlreadyExist"),
+                ("https://rdf.spdx.org/v3/Security/VexJustificationType/vulnerableCodeCannotBeControlledByAdversary", "vulnerableCodeCannotBeControlledByAdversary"),
+                ("https://rdf.spdx.org/v3/Security/VexJustificationType/vulnerableCodeNotInExecutePath", "vulnerableCodeNotInExecutePath"),
+                ("https://rdf.spdx.org/v3/Security/VexJustificationType/vulnerableCodeNotPresent", "vulnerableCodeNotPresent"),
+            ]),
             iri="https://rdf.spdx.org/v3/Security/justificationType",
+            compact="security_justificationType",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexNotAffectedVulnAssessmentRelationship"] = security_VexNotAffectedVulnAssessmentRelationship
 
 
 # Designates elements as products where the impact of a vulnerability is being
 # investigated.
+@register("https://rdf.spdx.org/v3/Security/VexUnderInvestigationVulnAssessmentRelationship", "security_VexUnderInvestigationVulnAssessmentRelationship")
 class security_VexUnderInvestigationVulnAssessmentRelationship(security_VexVulnAssessmentRelationship):
-    TYPE = "https://rdf.spdx.org/v3/Security/VexUnderInvestigationVulnAssessmentRelationship"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Security/VexUnderInvestigationVulnAssessmentRelationship"] = security_VexUnderInvestigationVulnAssessmentRelationship
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
 
 
 # Refers to any object that stores content on a computer.
+@register("https://rdf.spdx.org/v3/Software/File", "software_File")
 class software_File(software_SoftwareArtifact):
-    TYPE = "https://rdf.spdx.org/v3/Software/File"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides information about the content type of an Element.
-        self._add_property(
+        cls._add_property(
             "software_contentType",
             StringProp(pattern=r"^[^\/]+\/[^\/]+$",),
             iri="https://rdf.spdx.org/v3/Software/contentType",
+            compact="software_contentType",
         )
-        # If true, denotes the Element is a directory.
-        self._add_property(
-            "software_isDirectory",
-            BooleanProp(),
-            iri="https://rdf.spdx.org/v3/Software/isDirectory",
+        # Describes if a given file is a directory or non-directory kind of file.
+        cls._add_property(
+            "software_fileKind",
+            software_FileKindType(context=[
+                ("https://rdf.spdx.org/v3/Software/FileKindType/directory", "directory"),
+                ("https://rdf.spdx.org/v3/Software/FileKindType/file", "file"),
+            ]),
+            iri="https://rdf.spdx.org/v3/Software/fileKind",
+            compact="software_fileKind",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/File"] = software_File
 
 
 # Refers to any unit of content that can be associated with a distribution of software.
+@register("https://rdf.spdx.org/v3/Software/Package", "software_Package")
 class software_Package(software_SoftwareArtifact):
-    TYPE = "https://rdf.spdx.org/v3/Software/Package"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Identifies the download Uniform Resource Identifier for the package at the time that the document was created.
-        self._add_property(
+        cls._add_property(
             "software_downloadLocation",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Software/downloadLocation",
+            compact="software_downloadLocation",
         )
         # A place for the SPDX document creator to record a website that serves as the package's home page.
-        self._add_property(
+        cls._add_property(
             "software_homePage",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Software/homePage",
+            compact="software_homePage",
         )
         # Provides a place for the SPDX data creator to record the package URL string (in accordance with the [package URL spec](https://github.com/package-url/purl-spec/blob/master/PURL-SPECIFICATION.rst)) for a software Package.
-        self._add_property(
+        cls._add_property(
             "software_packageUrl",
             AnyURIProp(),
             iri="https://rdf.spdx.org/v3/Software/packageUrl",
+            compact="software_packageUrl",
         )
         # Identify the version of a package.
-        self._add_property(
+        cls._add_property(
             "software_packageVersion",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Software/packageVersion",
+            compact="software_packageVersion",
         )
         # Records any relevant background information or additional comments
         # about the origin of the package.
-        self._add_property(
+        cls._add_property(
             "software_sourceInfo",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Software/sourceInfo",
+            compact="software_sourceInfo",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/Package"] = software_Package
 
 
 # A collection of SPDX Elements describing a single package.
+@register("https://rdf.spdx.org/v3/Software/Sbom", "software_Sbom")
 class software_Sbom(Bom):
-    TYPE = "https://rdf.spdx.org/v3/Software/Sbom"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Provides information about the type of an SBOM.
-        self._add_property(
+        cls._add_property(
             "software_sbomType",
-            ListProp(software_SbomType()),
+            ListProp(software_SbomType(context=[
+                ("https://rdf.spdx.org/v3/Software/SbomType/analyzed", "analyzed"),
+                ("https://rdf.spdx.org/v3/Software/SbomType/build", "build"),
+                ("https://rdf.spdx.org/v3/Software/SbomType/deployed", "deployed"),
+                ("https://rdf.spdx.org/v3/Software/SbomType/design", "design"),
+                ("https://rdf.spdx.org/v3/Software/SbomType/runtime", "runtime"),
+                ("https://rdf.spdx.org/v3/Software/SbomType/source", "source"),
+            ])),
             iri="https://rdf.spdx.org/v3/Software/sbomType",
+            compact="software_sbomType",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/Sbom"] = software_Sbom
 
 
 # Describes a certain part of a file.
+@register("https://rdf.spdx.org/v3/Software/Snippet", "software_Snippet")
 class software_Snippet(software_SoftwareArtifact):
-    TYPE = "https://rdf.spdx.org/v3/Software/Snippet"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Defines the byte range in the original host file that the snippet information applies to.
-        self._add_property(
+        cls._add_property(
             "software_byteRange",
             ObjectProp(PositiveIntegerRange, False),
             iri="https://rdf.spdx.org/v3/Software/byteRange",
+            compact="software_byteRange",
         )
         # Defines the line range in the original host file that the snippet information applies to.
-        self._add_property(
+        cls._add_property(
             "software_lineRange",
             ObjectProp(PositiveIntegerRange, False),
             iri="https://rdf.spdx.org/v3/Software/lineRange",
+            compact="software_lineRange",
         )
         # Defines the original host file that the snippet information applies to.
-        self._add_property(
+        cls._add_property(
             "software_snippetFromFile",
             ObjectProp(software_File, True),
             iri="https://rdf.spdx.org/v3/Software/snippetFromFile",
             min_count=1,
+            compact="software_snippetFromFile",
         )
-        self._set_init_props(**kwargs)
 
 
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Software/Snippet"] = software_Snippet
-
-
-# Provides information about the fields in the AI package profile.
+# Specifies an AI package and its associated information.
+@register("https://rdf.spdx.org/v3/AI/AIPackage", "ai_AIPackage")
 class ai_AIPackage(software_Package):
-    TYPE = "https://rdf.spdx.org/v3/AI/AIPackage"
-    REFABLE = Refable.yes
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # States if a human is involved in the decisions of the AI software.
-        self._add_property(
+        cls._add_property(
             "ai_autonomyType",
-            PresenceType(),
+            PresenceType(context=[
+                ("https://rdf.spdx.org/v3/Core/PresenceType/no", "no"),
+                ("https://rdf.spdx.org/v3/Core/PresenceType/noAssertion", "noAssertion"),
+                ("https://rdf.spdx.org/v3/Core/PresenceType/yes", "yes"),
+            ]),
             iri="https://rdf.spdx.org/v3/AI/autonomyType",
+            compact="ai_autonomyType",
         )
         # Captures the domain in which the AI package can be used.
-        self._add_property(
+        cls._add_property(
             "ai_domain",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/AI/domain",
+            compact="ai_domain",
         )
-        # Indicates the amount of energy consumed to build the AI package.
-        self._add_property(
+        # Indicates the amount of energy consumed to train the AI model.
+        cls._add_property(
             "ai_energyConsumption",
             StringProp(),
             iri="https://rdf.spdx.org/v3/AI/energyConsumption",
+            compact="ai_energyConsumption",
         )
         # Records a hyperparameter used to build the AI model contained in the AI package.
-        self._add_property(
+        cls._add_property(
             "ai_hyperparameter",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/AI/hyperparameter",
+            compact="ai_hyperparameter",
         )
         # Provides relevant information about the AI software, not including the model description.
-        self._add_property(
+        cls._add_property(
             "ai_informationAboutApplication",
             StringProp(),
             iri="https://rdf.spdx.org/v3/AI/informationAboutApplication",
+            compact="ai_informationAboutApplication",
         )
         # Describes relevant information about different steps of the training process.
-        self._add_property(
+        cls._add_property(
             "ai_informationAboutTraining",
             StringProp(),
             iri="https://rdf.spdx.org/v3/AI/informationAboutTraining",
+            compact="ai_informationAboutTraining",
         )
         # Captures a limitation of the AI software.
-        self._add_property(
+        cls._add_property(
             "ai_limitation",
             StringProp(),
             iri="https://rdf.spdx.org/v3/AI/limitation",
+            compact="ai_limitation",
         )
         # Records the measurement of prediction quality of the AI model.
-        self._add_property(
+        cls._add_property(
             "ai_metric",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/AI/metric",
+            compact="ai_metric",
         )
         # Captures the threshold that was used for computation of a metric described in the metric field.
-        self._add_property(
+        cls._add_property(
             "ai_metricDecisionThreshold",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/AI/metricDecisionThreshold",
+            compact="ai_metricDecisionThreshold",
         )
         # Describes all the preprocessing steps applied to the training data before the model training.
-        self._add_property(
+        cls._add_property(
             "ai_modelDataPreprocessing",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/AI/modelDataPreprocessing",
+            compact="ai_modelDataPreprocessing",
         )
         # Describes methods that can be used to explain the model.
-        self._add_property(
+        cls._add_property(
             "ai_modelExplainability",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/AI/modelExplainability",
+            compact="ai_modelExplainability",
         )
-        # Categorizes safety risk impact of AI software.
-        self._add_property(
+        # Categorizes general safety risk assessment of the AI system.
+        cls._add_property(
             "ai_safetyRiskAssessment",
-            ai_SafetyRiskAssessmentType(),
+            ai_SafetyRiskAssessmentType(context=[
+                ("https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/high", "high"),
+                ("https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/low", "low"),
+                ("https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/medium", "medium"),
+                ("https://rdf.spdx.org/v3/AI/SafetyRiskAssessmentType/serious", "serious"),
+            ]),
             iri="https://rdf.spdx.org/v3/AI/safetyRiskAssessment",
-        )
-        # Records if sensitive personal information is used during model training.
-        self._add_property(
-            "ai_sensitivePersonalInformation",
-            PresenceType(),
-            iri="https://rdf.spdx.org/v3/AI/sensitivePersonalInformation",
+            compact="ai_safetyRiskAssessment",
         )
         # Captures a standard that is being complied with.
-        self._add_property(
+        cls._add_property(
             "ai_standardCompliance",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/AI/standardCompliance",
+            compact="ai_standardCompliance",
         )
         # Records the type of the model used in the AI software.
-        self._add_property(
+        cls._add_property(
             "ai_typeOfModel",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/AI/typeOfModel",
+            compact="ai_typeOfModel",
         )
-        self._set_init_props(**kwargs)
+        # Records if sensitive personal information is used during model training or could be used during the inference.
+        cls._add_property(
+            "ai_useSensitivePersonalInformation",
+            PresenceType(context=[
+                ("https://rdf.spdx.org/v3/Core/PresenceType/no", "no"),
+                ("https://rdf.spdx.org/v3/Core/PresenceType/noAssertion", "noAssertion"),
+                ("https://rdf.spdx.org/v3/Core/PresenceType/yes", "yes"),
+            ]),
+            iri="https://rdf.spdx.org/v3/AI/useSensitivePersonalInformation",
+            compact="ai_useSensitivePersonalInformation",
+        )
 
 
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/AI/AIPackage"] = ai_AIPackage
-
-
-# Provides information about the fields in the Dataset profile.
-class dataset_Dataset(software_Package):
-    TYPE = "https://rdf.spdx.org/v3/Dataset/Dataset"
-    REFABLE = Refable.yes
+# Specifies a data package and its associated information.
+@register("https://rdf.spdx.org/v3/Dataset/DatasetPackage", "dataset_DatasetPackage")
+class dataset_DatasetPackage(software_Package):
+    NODE_KIND = NodeKind.BlankNodeOrIRI
     ID_ALIAS = "spdxId"
 
-    def __init__(self, **kwargs):
-        super().__init__()
+    @classmethod
+    def _register_props(cls):
+        super()._register_props()
         # Describes the anonymization methods used.
-        self._add_property(
+        cls._add_property(
             "dataset_anonymizationMethodUsed",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
+            compact="dataset_anonymizationMethodUsed",
         )
         # Describes the confidentiality level of the data points contained in the dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_confidentialityLevel",
-            dataset_ConfidentialityLevelType(),
+            dataset_ConfidentialityLevelType(context=[
+                ("https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType/amber", "amber"),
+                ("https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType/clear", "clear"),
+                ("https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType/green", "green"),
+                ("https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType/red", "red"),
+            ]),
             iri="https://rdf.spdx.org/v3/Dataset/confidentialityLevel",
+            compact="dataset_confidentialityLevel",
         )
         # Describes how the dataset was collected.
-        self._add_property(
+        cls._add_property(
             "dataset_dataCollectionProcess",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Dataset/dataCollectionProcess",
+            compact="dataset_dataCollectionProcess",
         )
         # Describes the preprocessing steps that were applied to the raw data to create the given dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_dataPreprocessing",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Dataset/dataPreprocessing",
+            compact="dataset_dataPreprocessing",
         )
         # The field describes the availability of a dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_datasetAvailability",
-            dataset_DatasetAvailabilityType(),
+            dataset_DatasetAvailabilityType(context=[
+                ("https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/clickthrough", "clickthrough"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/directDownload", "directDownload"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/query", "query"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/registration", "registration"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType/scrapingScript", "scrapingScript"),
+            ]),
             iri="https://rdf.spdx.org/v3/Dataset/datasetAvailability",
+            compact="dataset_datasetAvailability",
         )
         # Describes potentially noisy elements of the dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_datasetNoise",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Dataset/datasetNoise",
+            compact="dataset_datasetNoise",
         )
         # Captures the size of the dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_datasetSize",
             NonNegativeIntegerProp(),
             iri="https://rdf.spdx.org/v3/Dataset/datasetSize",
+            compact="dataset_datasetSize",
         )
         # Describes the type of the given dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_datasetType",
-            ListProp(dataset_DatasetType()),
+            ListProp(dataset_DatasetType(context=[
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/audio", "audio"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/categorical", "categorical"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/graph", "graph"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/image", "image"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/noAssertion", "noAssertion"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/numeric", "numeric"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/other", "other"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/sensor", "sensor"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/structured", "structured"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/syntactic", "syntactic"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/text", "text"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/timeseries", "timeseries"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/timestamp", "timestamp"),
+                ("https://rdf.spdx.org/v3/Dataset/DatasetType/video", "video"),
+            ])),
             iri="https://rdf.spdx.org/v3/Dataset/datasetType",
             min_count=1,
+            compact="dataset_datasetType",
         )
         # Describes a mechanism to update the dataset.
-        self._add_property(
+        cls._add_property(
             "dataset_datasetUpdateMechanism",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
+            compact="dataset_datasetUpdateMechanism",
+        )
+        # Describes if any sensitive personal information is present in the dataset.
+        cls._add_property(
+            "dataset_hasSensitivePersonalInformation",
+            PresenceType(context=[
+                ("https://rdf.spdx.org/v3/Core/PresenceType/no", "no"),
+                ("https://rdf.spdx.org/v3/Core/PresenceType/noAssertion", "noAssertion"),
+                ("https://rdf.spdx.org/v3/Core/PresenceType/yes", "yes"),
+            ]),
+            iri="https://rdf.spdx.org/v3/Dataset/hasSensitivePersonalInformation",
+            compact="dataset_hasSensitivePersonalInformation",
         )
         # Describes what the given dataset should be used for.
-        self._add_property(
+        cls._add_property(
             "dataset_intendedUse",
             StringProp(),
             iri="https://rdf.spdx.org/v3/Dataset/intendedUse",
+            compact="dataset_intendedUse",
         )
         # Records the biases that the dataset is known to encompass.
-        self._add_property(
+        cls._add_property(
             "dataset_knownBias",
             ListProp(StringProp()),
             iri="https://rdf.spdx.org/v3/Dataset/knownBias",
-        )
-        # Describes if any sensitive personal information is present in the dataset.
-        self._add_property(
-            "dataset_sensitivePersonalInformation",
-            PresenceType(),
-            iri="https://rdf.spdx.org/v3/Dataset/sensitivePersonalInformation",
+            compact="dataset_knownBias",
         )
         # Describes a sensor used for collecting the data.
-        self._add_property(
+        cls._add_property(
             "dataset_sensor",
             ListProp(ObjectProp(DictionaryEntry, False)),
             iri="https://rdf.spdx.org/v3/Dataset/sensor",
+            compact="dataset_sensor",
         )
-        self._set_init_props(**kwargs)
-
-
-SHACLObject.DESERIALIZERS["https://rdf.spdx.org/v3/Dataset/Dataset"] = dataset_Dataset
-
-
-# Copyright (c) 2024 Joshua Watt
-#
-# SPDX-License-Identifier: MIT
-
-
-class Context(object):
-    from contextlib import contextmanager
-
-    def __init__(self, contexts=[]):
-        self.contexts = [c for c in contexts if c]
-        self.__vocabs = []
-        self.__expanded = {}
-        self.__compacted = {}
-
-    @contextmanager
-    def vocab_push(self, vocab):
-        if not vocab:
-            yield self
-            return
-
-        self.__vocabs.append(vocab)
-        try:
-            yield self
-        finally:
-            self.__vocabs.pop()
-
-    def __get_vocab_contexts(self):
-        contexts = []
-
-        for v in self.__vocabs:
-            for ctx in self.contexts:
-                # Check for vocabulary contexts
-                for name, value in ctx.items():
-                    if (
-                        isinstance(value, dict)
-                        and value["@type"] == "@vocab"
-                        and v == self.__expand(value["@id"], self.contexts)
-                    ):
-                        contexts.insert(0, value["@context"])
-
-        return contexts
-
-    def compact(self, _id):
-        return self.__compact_contexts(_id)
-
-    def compact_vocab(self, _id, vocab=None):
-        with self.vocab_push(vocab):
-            if not self.__vocabs:
-                v = ""
-            else:
-                v = self.__vocabs[-1]
-
-            return self.__compact_contexts(_id, v, self.__get_vocab_contexts())
-
-    def __compact_contexts(self, _id, v="", apply_vocabs=False):
-        if v not in self.__compacted or _id not in self.__compacted[v]:
-            if apply_vocabs:
-                contexts = self.__get_vocab_contexts() + self.contexts
-            else:
-                contexts = self.contexts
-
-            self.__compacted.setdefault(v, {})[_id] = self.__compact(
-                _id,
-                contexts,
-                apply_vocabs,
-            )
-        return self.__compacted[v][_id]
-
-    def __compact(self, _id, contexts, apply_vocabs):
-        def remove_prefix(_id, value):
-            possible = set()
-            if _id.startswith(value):
-                tmp_id = _id[len(value) :]
-                possible.add(tmp_id)
-                possible |= collect_possible(tmp_id)
-            return possible
-
-        def collect_possible(_id):
-            possible = set()
-            for ctx in contexts:
-                for name, value in ctx.items():
-                    if name == "@vocab":
-                        if apply_vocabs:
-                            possible |= remove_prefix(_id, value)
-                    elif name == "@base":
-                        possible |= remove_prefix(_id, value)
-                    else:
-                        if isinstance(value, dict):
-                            value = value["@id"]
-
-                        if _id == value:
-                            possible.add(name)
-                            possible |= collect_possible(name)
-                        elif _id.startswith(value):
-                            tmp_id = name + ":" + _id[len(value) :].lstrip("/")
-                            possible.add(tmp_id)
-                            possible |= collect_possible(tmp_id)
-
-            return possible
-
-        possible = collect_possible(_id)
-        if not possible:
-            return _id
-
-        # To select from the possible identifiers, choose the one that has the
-        # least context (fewest ":"), then the shortest, and finally
-        # alphabetically
-        possible = list(possible)
-        possible.sort(key=lambda p: (p.count(":"), len(p), p))
-
-        return possible[0]
-
-    def is_relative(self, _id):
-        import re
-
-        return not re.match(r"[^:]+:", _id)
-
-    def __expand_contexts(self, _id, v="", apply_vocabs=False):
-        if v not in self.__expanded or _id not in self.__expanded[v]:
-            if apply_vocabs:
-                contexts = self.__get_vocab_contexts() + self.contexts
-
-                # Apply contexts
-                for ctx in contexts:
-                    for name, value in ctx.items():
-                        if name == "@vocab":
-                            _id = value + _id
-            else:
-                contexts = self.contexts
-
-            for ctx in contexts:
-                for name, value in ctx.items():
-                    if name == "@base" and self.is_relative(_id):
-                        _id = value + _id
-
-            self.__expanded.setdefault(v, {})[_id] = self.__expand(_id, contexts)
-
-        return self.__expanded[v][_id]
-
-    def expand(self, _id):
-        return self.__expand_contexts(_id)
-
-    def expand_vocab(self, _id, vocab=""):
-        with self.vocab_push(vocab):
-            if not self.__vocabs:
-                v = ""
-            else:
-                v = self.__vocabs[-1]
-
-            return self.__expand_contexts(_id, v, True)
-
-    def __expand(self, _id, contexts):
-        for ctx in contexts:
-            if ":" not in _id:
-                if _id in ctx:
-                    if isinstance(ctx[_id], dict):
-                        return self.__expand(ctx[_id]["@id"], contexts)
-                    return self.__expand(ctx[_id], contexts)
-                continue
-
-            prefix, suffix = _id.split(":", 1)
-            if prefix not in ctx:
-                continue
-
-            return self.__expand(prefix, contexts) + suffix
-
-        return _id
 
 
 """Format Guard"""
@@ -5085,17 +4777,18 @@ def main():
 
     args = parser.parse_args()
 
+    doc = SHACLDocument()
     with args.infile.open("r") as f:
         d = JSONLDDeserializer()
-        objects, _ = d.read(f)
+        d.read(f, doc)
 
     if args.print:
-        print_tree(objects)
+        print_tree(doc.objects)
 
     if args.outfile:
         with args.outfile.open("wb") as f:
             s = JSONLDSerializer()
-            s.write(objects, f)
+            s.write(doc, f)
 
     return 0
 
