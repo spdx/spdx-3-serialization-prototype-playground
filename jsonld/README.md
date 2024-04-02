@@ -76,12 +76,12 @@ The JSON schema and language bindings in this repository are generated using
 `shacl2code` with the following commands:
 
 ```shell
-shacl2code generate -i spdx-3.0-ontology.rdf.ttl \
+shacl2code generate -i spdx-3.0-ontology.rdf.ttl -i annotations.ttl \
     -u spdx-3.0-context.json-ld \
         https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld \
     jsonschema -o spdx-3.0-schema.json
 
-shacl2code generate -i spdx-3.0-ontology.rdf.ttl \
+shacl2code generate -i spdx-3.0-ontology.rdf.ttl -i annotations.ttl \
     -u spdx-3.0-context.json-ld \
        https://raw.githubusercontent.com/spdx/spdx-3-serialization-prototype-playground/main/jsonld/spdx-3.0-context.json-ld \
     python -o bindings/spdx3_0.py
