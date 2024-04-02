@@ -90,13 +90,6 @@
       "@id": "https://rdf.spdx.org/v3/AI/safetyRiskAssessment",
       "@type": "@vocab"
     },
-    "ai_sensitivePersonalInformation": {
-      "@context": {
-        "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/"
-      },
-      "@id": "https://rdf.spdx.org/v3/AI/sensitivePersonalInformation",
-      "@type": "@vocab"
-    },
     "ai_standardCompliance": {
       "@id": "https://rdf.spdx.org/v3/AI/standardCompliance",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
@@ -104,6 +97,13 @@
     "ai_typeOfModel": {
       "@id": "https://rdf.spdx.org/v3/AI/typeOfModel",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
+    },
+    "ai_useSensitivePersonalInformation": {
+      "@context": {
+        "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/"
+      },
+      "@id": "https://rdf.spdx.org/v3/AI/useSensitivePersonalInformation",
+      "@type": "@vocab"
     },
     "algorithm": {
       "@context": {
@@ -126,7 +126,7 @@
     "build_Build": "https://rdf.spdx.org/v3/Build/Build",
     "build_buildEndTime": {
       "@id": "https://rdf.spdx.org/v3/Build/buildEndTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "build_buildId": {
       "@id": "https://rdf.spdx.org/v3/Build/buildId",
@@ -134,7 +134,7 @@
     },
     "build_buildStartTime": {
       "@id": "https://rdf.spdx.org/v3/Build/buildStartTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "build_buildType": {
       "@id": "https://rdf.spdx.org/v3/Build/buildType",
@@ -162,7 +162,7 @@
     },
     "builtTime": {
       "@id": "https://rdf.spdx.org/v3/Core/builtTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "comment": {
       "@id": "https://rdf.spdx.org/v3/Core/comment",
@@ -185,7 +185,7 @@
     },
     "created": {
       "@id": "https://rdf.spdx.org/v3/Core/created",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "createdBy": {
       "@id": "https://rdf.spdx.org/v3/Core/createdBy",
@@ -204,8 +204,8 @@
       "@type": "@id"
     },
     "dataset_ConfidentialityLevelType": "https://rdf.spdx.org/v3/Dataset/ConfidentialityLevelType",
-    "dataset_Dataset": "https://rdf.spdx.org/v3/Dataset/Dataset",
     "dataset_DatasetAvailabilityType": "https://rdf.spdx.org/v3/Dataset/DatasetAvailabilityType",
+    "dataset_DatasetPackage": "https://rdf.spdx.org/v3/Dataset/DatasetPackage",
     "dataset_DatasetType": "https://rdf.spdx.org/v3/Dataset/DatasetType",
     "dataset_anonymizationMethodUsed": {
       "@id": "https://rdf.spdx.org/v3/Dataset/anonymizationMethodUsed",
@@ -252,6 +252,13 @@
       "@id": "https://rdf.spdx.org/v3/Dataset/datasetUpdateMechanism",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
     },
+    "dataset_hasSensitivePersonalInformation": {
+      "@context": {
+        "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/"
+      },
+      "@id": "https://rdf.spdx.org/v3/Dataset/hasSensitivePersonalInformation",
+      "@type": "@vocab"
+    },
     "dataset_intendedUse": {
       "@id": "https://rdf.spdx.org/v3/Dataset/intendedUse",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
@@ -259,13 +266,6 @@
     "dataset_knownBias": {
       "@id": "https://rdf.spdx.org/v3/Dataset/knownBias",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
-    },
-    "dataset_sensitivePersonalInformation": {
-      "@context": {
-        "@vocab": "https://rdf.spdx.org/v3/Core/PresenceType/"
-      },
-      "@id": "https://rdf.spdx.org/v3/Dataset/sensitivePersonalInformation",
-      "@type": "@vocab"
     },
     "dataset_sensor": {
       "@id": "https://rdf.spdx.org/v3/Dataset/sensor",
@@ -289,7 +289,7 @@
     },
     "endTime": {
       "@id": "https://rdf.spdx.org/v3/Core/endTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "expandedlicensing_ConjunctiveLicenseSet": "https://rdf.spdx.org/v3/ExpandedLicensing/ConjunctiveLicenseSet",
     "expandedlicensing_CustomLicense": "https://rdf.spdx.org/v3/ExpandedLicensing/CustomLicense",
@@ -410,7 +410,6 @@
       "@id": "https://rdf.spdx.org/v3/Core/hashValue",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
     },
-    "id": "@id",
     "identifier": {
       "@id": "https://rdf.spdx.org/v3/Core/identifier",
       "@type": "http://www.w3.org/2001/XMLSchema#string"
@@ -479,7 +478,7 @@
     },
     "releaseTime": {
       "@id": "https://rdf.spdx.org/v3/Core/releaseTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "rootElement": {
       "@id": "https://rdf.spdx.org/v3/Core/rootElement",
@@ -515,7 +514,7 @@
     },
     "security_actionStatementTime": {
       "@id": "https://rdf.spdx.org/v3/Security/actionStatementTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "security_assessedElement": {
       "@id": "https://rdf.spdx.org/v3/Security/assessedElement",
@@ -545,7 +544,7 @@
     },
     "security_impactStatementTime": {
       "@id": "https://rdf.spdx.org/v3/Security/impactStatementTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "security_justificationType": {
       "@context": {
@@ -560,7 +559,7 @@
     },
     "security_modifiedTime": {
       "@id": "https://rdf.spdx.org/v3/Security/modifiedTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "security_percentile": {
       "@id": "https://rdf.spdx.org/v3/Security/percentile",
@@ -572,7 +571,7 @@
     },
     "security_publishedTime": {
       "@id": "https://rdf.spdx.org/v3/Security/publishedTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "security_score": {
       "@id": "https://rdf.spdx.org/v3/Security/score",
@@ -599,7 +598,7 @@
     },
     "security_withdrawnTime": {
       "@id": "https://rdf.spdx.org/v3/Security/withdrawnTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "simplelicensing_AnyLicenseInfo": "https://rdf.spdx.org/v3/SimpleLicensing/AnyLicenseInfo",
     "simplelicensing_LicenseExpression": "https://rdf.spdx.org/v3/SimpleLicensing/LicenseExpression",
@@ -621,6 +620,7 @@
       "@type": "http://www.w3.org/2001/XMLSchema#string"
     },
     "software_File": "https://rdf.spdx.org/v3/Software/File",
+    "software_FileKindType": "https://rdf.spdx.org/v3/Software/FileKindType",
     "software_Package": "https://rdf.spdx.org/v3/Software/Package",
     "software_Sbom": "https://rdf.spdx.org/v3/Software/Sbom",
     "software_SbomType": "https://rdf.spdx.org/v3/Software/SbomType",
@@ -654,6 +654,13 @@
       "@id": "https://rdf.spdx.org/v3/Software/downloadLocation",
       "@type": "http://www.w3.org/2001/XMLSchema#anyURI"
     },
+    "software_fileKind": {
+      "@context": {
+        "@vocab": "https://rdf.spdx.org/v3/Software/FileKindType/"
+      },
+      "@id": "https://rdf.spdx.org/v3/Software/fileKind",
+      "@type": "@vocab"
+    },
     "software_gitoid": {
       "@id": "https://rdf.spdx.org/v3/Software/gitoid",
       "@type": "http://www.w3.org/2001/XMLSchema#anyURI"
@@ -661,10 +668,6 @@
     "software_homePage": {
       "@id": "https://rdf.spdx.org/v3/Software/homePage",
       "@type": "http://www.w3.org/2001/XMLSchema#anyURI"
-    },
-    "software_isDirectory": {
-      "@id": "https://rdf.spdx.org/v3/Software/isDirectory",
-      "@type": "http://www.w3.org/2001/XMLSchema#boolean"
     },
     "software_lineRange": {
       "@id": "https://rdf.spdx.org/v3/Software/lineRange",
@@ -712,7 +715,7 @@
     },
     "startTime": {
       "@id": "https://rdf.spdx.org/v3/Core/startTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "statement": {
       "@id": "https://rdf.spdx.org/v3/Core/statement",
@@ -744,7 +747,7 @@
     "type": "@type",
     "validUntilTime": {
       "@id": "https://rdf.spdx.org/v3/Core/validUntilTime",
-      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTimeStamp"
     },
     "value": {
       "@id": "https://rdf.spdx.org/v3/Core/value",

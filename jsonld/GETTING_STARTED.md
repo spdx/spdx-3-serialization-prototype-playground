@@ -192,10 +192,10 @@ Hopefully this is making sense. We are saying this object is a
 [CreationInfo][Class_CreationInfo].
 
 ```json
-            "id": "_:creationinfo",
+            "@id": "_:creationinfo",
 ```
 
-This object also has an `id` similar to the `spdxId` of our person, but it is
+This object also has an `@id` similar to the `spdxId` of our person, but it is
 subtly different First of all, this one is _not_ a URI like our
 [Person][Class_Person], but instead starts with a `_:`. This type of identifier
 is known as a _blank node_. Blank nodes serve a similar purpose to the URI of
@@ -208,7 +208,7 @@ string that you choose.
 
 It should be noted that [CreationInfo][Class_CreationInfo] does _not_ derive
 from [Element][Class_Element] class (like our previous example of
-[ExternalIdentifier][Class_ExternalIdentifier]), and as such the `id` property
+[ExternalIdentifier][Class_ExternalIdentifier]), and as such the `@id` property
 is technically optional. However, since we will need to refer to this object at
 other places in the document, we must give it an identifier.  This also means
 that this object does not have a mandatory
@@ -218,7 +218,7 @@ _only_ allowed to have a blank node identifier.
 
 If you look back at the [Person][Class_Person] we just created, you'll notice
 that its [creationInfo][Property_creationInfo] property has the string value
-that matches the `id` of this object; this is how objects are linked together
+that matches the `@id` of this object; this is how objects are linked together
 by reference in SPDX.
 
 Next, we need to specify which version of the SPDX spec that elements linking
